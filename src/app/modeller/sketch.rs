@@ -1221,6 +1221,29 @@ impl App {
         }
     }
 
+    /// Picks line `index` of the open sketch, as a click on it with the Pick tool does, and with
+    /// `slope` gives it that angle (degrees; 0: no slope, a gable) when the sketch is a roof's.
+    /// Tells how many lines the sketch has; an error when none is open or it has no such line.
+    pub(crate) fn sketch_pick_line(&mut self, index: usize, slope: Option<f64>) -> Result<usize, String> {
+        let sketch = self.modeller.sketch.as_mut().ok_or("no sketch is open")?;
+        let lines = sketch.segments.len();
+        if index >= lines {
+            return Err(format!("the sketch has {lines} lines: 0 to {}", lines.saturating_sub(1)));
+        }
+        sketch.tool = SketchTool::Pick;
+        sketch.picked = Some(index);
+        if let Some(degrees) = slope {
+            if !self.sketching_roof() {
+                return Err("only the lines of a roof's outline slope: start the sketch with the Roof tool".into());
+            }
+            if !(0.0..=85.0).contains(&degrees) {
+                return Err("slope: 0 to 85 degrees".into());
+            }
+            self.sketch_slope_typed(format!("{degrees}"));
+        }
+        Ok(lines)
+    }
+
     /// The Roof tool: the Slab tool making a roof, its sketch open; a roof that would be flat
     /// gets the usual pitch.
     pub(in crate::app) fn start_roof_tool(&mut self, name: &'static str) {

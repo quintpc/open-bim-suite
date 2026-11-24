@@ -456,6 +456,11 @@ impl App {
                 Ok(self.visibility_json())
             }
             "place_model_point" => self.place_model_point(a.get("x").and_then(Value::as_f64).ok_or("x in metres required")?, a.get("y").and_then(Value::as_f64).ok_or("y in metres required")?, a.get("rotation").and_then(Value::as_f64)),
+            "sketch_line" => {
+                let index = a.get("index").and_then(Value::as_u64).ok_or("index: the line's place in the sketch, from 0")? as usize;
+                let lines = self.sketch_pick_line(index, a.get("slope").and_then(Value::as_f64))?;
+                Ok(json!({ "picked": index, "lines": lines }))
+            }
             "pick" => self.remote_pick(a),
             "place_cursor" => {
                 let (x, y) = (num(a, "x").ok_or("x is required")?, num(a, "y").ok_or("y is required")?);

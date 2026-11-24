@@ -1191,6 +1191,12 @@ impl Studio {
                             _ => None,
                         };
                         let mut messages = run(size, first);
+                        // a control at the very edge of the window lies under the border the window
+                        // is resized by: the click on it is not a pull at that border, and the
+                        // control is clicked where it shows whole (see below)
+                        if target.is_some() {
+                            messages.retain(|m| !matches!(m, Msg::ResizeEdge(_)));
+                        }
                         // a key no control took, with none named: the window's own key, as the
                         // keyboard sends it (a shortcut, a key of the Modeller, Tab)
                         if messages.is_empty() && call.cmd == "ui_key" && target.is_none() && point.is_none() {

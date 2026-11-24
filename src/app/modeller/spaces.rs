@@ -10,7 +10,8 @@
 //! - **How they show.** A label in the middle of each space, over the 3D view and the floor
 //!   plans: its name ("Space 1", numbered per level by where it lies, south-west first) and its
 //!   area in m².
-//! - Openings count for nothing: a doorway does not open a room. A room open on one side is none.
+//! - Openings count for nothing: a doorway does not open a room, and a door or window standing
+//!   between the ends of two walls closes the gap between them. A room open on one side is none.
 
 use crate::app::App;
 use bim_core::element::PlanarForm;
@@ -344,6 +345,12 @@ impl App {
             let (a, b, base, half) = match e.shape_in_project(&grid) {
                 Shape::Planar(p @ PlanarDef { form: PlanarForm::Wall { start, end, base, .. }, .. }) => (start, end, base, p.total_thickness() / 2.0),
                 Shape::System(s) if !s.lies() => (s.start, s.end, s.base, s.member.max_element() / 2.0),
+                // a door or a window closes the gap it stands in as a wall does: one placed
+                // between the ends of two walls (and not in a wall) does not leave the room open
+                Shape::Point(bim_core::PointDef { at, rotation, size, opening: Some(_), .. }) => {
+                    let along = DVec2::from_angle(rotation) * (size.x / 2.0);
+                    (at.truncate() - along, at.truncate() + along, at.z, size.y / 2.0)
+                }
                 _ => continue,
             };
             let bound = Bound { a, b, half };
@@ -597,6 +604,24 @@ mod tests {
         let mut areas: Vec<f64> = regions(bounds).iter().map(|r| (signed_area(r) * 1e6).round() / 1e6).collect();
         areas.sort_by(f64::total_cmp);
         areas
+    }
+
+    #[test]
+    fn a_door_between_two_wall_ends_closes_the_room() {
+        use crate::app::modeller::ModelTool;
+        let mut app = App::default();
+        app.new_model("Level 0");
+        let level = app.work_plane().2;
+        let wall = |a: (f64, f64), b: (f64, f64)| Shape::Planar(PlanarDef { form: PlanarForm::Wall { start: DVec2::new(a.0, a.1), end: DVec2::new(b.0, b.1), base: 0.0, height: 3.0 }, thickness: 0.2, openings: Vec::new(), build_up: None });
+        // four walls with a gap of a metre in the south one
+        for (a, b) in [((0.0, 0.0), (2.0, 0.0)), ((3.0, 0.0), (6.0, 0.0)), ((6.0, 0.0), (6.0, 4.0)), ((6.0, 4.0), (0.0, 4.0)), ((0.0, 4.0), (0.0, 0.0))] {
+            app.add_element("Wall", level.clone(), wall(a, b)).unwrap();
+        }
+        assert!(app.spaces().is_empty());
+        app.set_model_tool(Some((ModelTool::Door, "Door")));
+        app.place_message(crate::app::placement::PlaceMessage::Field(crate::app::placement::PlaceField::Width, "1.0".into()));
+        app.place_opening_at(ModelTool::Door, 2.5, 0.0, 0.0);
+        assert_eq!(app.spaces().len(), 1, "{:?}", app.modeller.refusal);
     }
 
     #[test]
