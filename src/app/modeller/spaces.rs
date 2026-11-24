@@ -23,6 +23,11 @@ use iced::{alignment, mouse, Color, Point, Rectangle};
 const SAME: f64 = 1e-3;
 /// A wall's end this far past another's face still ends on it (metres).
 const REACH: f64 = 0.01;
+/// Two sides whose directions differ less than this (the sine of their angle) run on in one line.
+const STRAIGHT: f64 = 0.02;
+/// A region narrower than this on average (twice its area over its perimeter, metres) is no
+/// space: the cavity of a cavity wall, a slit between two walls.
+const NARROW: f64 = 0.25;
 /// The labels show over the viewport when the view looks down at least this steeply (radians).
 const LOOKING_DOWN: f32 = 1.0;
 
@@ -223,11 +228,30 @@ pub fn regions(bounds: &[Bound]) -> Vec<Vec<DVec2>> {
         }
     }
     // what ends loose closes nothing in
-    loop {
-        let degree = |n: usize| edges.iter().filter(|e| e.0 == n || e.1 == n).count();
-        let Some(k) = edges.iter().position(|e| degree(e.0) < 2 || degree(e.1) < 2) else { break };
-        edges.remove(k);
+    // (how many stretches meet at each point is kept, not counted again for every stretch: a
+    // storey of some hundreds of walls is searched in a moment)
+    let mut degree = vec![0usize; points.len()];
+    for e in &edges {
+        degree[e.0] += 1;
+        degree[e.1] += 1;
     }
+    let mut kept = vec![true; edges.len()];
+    loop {
+        let mut gone = false;
+        for (k, e) in edges.iter().enumerate() {
+            if kept[k] && (degree[e.0] < 2 || degree[e.1] < 2) {
+                kept[k] = false;
+                degree[e.0] -= 1;
+                degree[e.1] -= 1;
+                gone = true;
+            }
+        }
+        if !gone {
+            break;
+        }
+    }
+    let mut kept = kept.into_iter();
+    edges.retain(|_| kept.next().unwrap_or(true));
     // each stretch walked both ways; at its head the walk turns to the next stretch clockwise, so
     // a region is walked with its inside on the left
     let halves: Vec<(usize, usize, f64)> = edges.iter().flat_map(|e| [(e.0, e.1, e.2), (e.1, e.0, e.2)]).collect();
@@ -248,7 +272,8 @@ pub fn regions(bounds: &[Bound]) -> Vec<Vec<DVec2>> {
             .unwrap_or(h ^ 1)
     };
     let mut walked = vec![false; halves.len()];
-    let mut out = Vec::new();
+    // each region found: the ring of its walls' axes and the outline between their inner faces
+    let mut found: Vec<(Vec<DVec2>, Vec<DVec2>)> = Vec::new();
     for start in 0..halves.len() {
         if walked[start] {
             continue;
@@ -270,17 +295,42 @@ pub fn regions(bounds: &[Bound]) -> Vec<Vec<DVec2>> {
             let inward = (b - a).normalize_or_zero().perp() * thick[k];
             (a + inward, b + inward)
         };
+        // where two sides run on in one line (a thin wall going on as a thick one) their inner
+        // faces do not cross: the outline steps from the one face to the other there
         let inner: Vec<DVec2> = (0..n)
-            .map(|k| {
+            .flat_map(|k| {
                 let ((a, b), (c, d)) = (side((k + n - 1) % n), side(k));
-                crate::app::grips::crossing(a, b, c, d).unwrap_or(c)
+                let (r, s) = ((b - a).normalize_or_zero(), (d - c).normalize_or_zero());
+                if r.perp_dot(s).abs() < STRAIGHT {
+                    return if b.distance(c) <= SAME { vec![c] } else { vec![b, c] };
+                }
+                vec![crate::app::grips::crossing(a, b, c, d).unwrap_or(c)]
             })
             .collect();
         if signed_area(&inner) > SAME {
-            out.push(inner);
+            found.push((ring, inner));
         }
     }
-    out
+    // a cavity between two leaves or a slit between two walls is no room: what is narrow goes.
+    // A region that lies around others (the cavity round the inner leaf of a house) is as wide
+    // as what is left of it between them
+    let around = |ring: &[DVec2]| (0..ring.len()).map(|k| ring[k].distance(ring[(k + 1) % ring.len()])).sum::<f64>();
+    let holds = |outer: &[DVec2], other: &[DVec2]| signed_area(other) < signed_area(outer) && other.iter().all(|p| inside(outer, *p) || outer.iter().any(|q| q.distance(*p) <= SAME * 10.0));
+    (0..found.len())
+        .filter(|&k| {
+            let (ring, inner) = &found[k];
+            let within: Vec<usize> = (0..found.len()).filter(|&j| j != k && holds(ring, &found[j].0)).collect();
+            // those lying in another of them are counted with it
+            let islands = within.iter().filter(|&&j| !within.iter().any(|&i| i != j && holds(&found[i].0, &found[j].0)));
+            let (mut area, mut edge) = (signed_area(inner), around(inner));
+            for &j in islands {
+                area -= signed_area(&found[j].0);
+                edge += around(&found[j].0);
+            }
+            2.0 * area >= NARROW * edge
+        })
+        .map(|k| found[k].1.clone())
+        .collect()
 }
 
 impl App {
@@ -303,8 +353,19 @@ impl App {
             }
         }
         let mut out = Vec::new();
+        // the regions of a level are kept while its walls stay as they are: the labels over the
+        // view ask for the spaces with every frame
+        let mut kept = self.modeller.regions.borrow_mut();
+        kept.retain(|(walls, _)| by_level.iter().any(|(_, _, w)| w == walls));
         for (level, z, walls) in by_level {
-            let mut found = regions(&walls);
+            let mut found = match kept.iter().find(|(w, _)| *w == walls) {
+                Some((_, found)) => found.clone(),
+                None => {
+                    let found = regions(&walls);
+                    kept.push((walls, found.clone()));
+                    found
+                }
+            };
             let middle = |ring: &Vec<DVec2>| ring.iter().sum::<DVec2>() / ring.len() as f64;
             found.sort_by(|a, b| {
                 let (p, q) = (middle(a), middle(b));
@@ -475,9 +536,12 @@ impl App {
         if self.camera.pitch.abs() < LOOKING_DOWN {
             return None;
         }
+        // of the level worked on: those of every storey lie over each other from above
+        let (_, _, level) = self.work_plane();
         let labels: Vec<(Vec3, String)> = self
             .spaces()
             .into_iter()
+            .filter(|s| s.level.is_none() || s.level == level)
             .map(|s| {
                 let middle = s.outline.iter().sum::<DVec2>() / s.outline.len() as f64;
                 (middle.extend(s.z).as_vec3(), format!("{}\n{:.2} m²", s.name, s.area))
@@ -533,6 +597,31 @@ mod tests {
         let mut areas: Vec<f64> = regions(bounds).iter().map(|r| (signed_area(r) * 1e6).round() / 1e6).collect();
         areas.sort_by(f64::total_cmp);
         areas
+    }
+
+    #[test]
+    fn a_cavity_is_no_space_and_a_thin_wall_going_on_as_a_thick_one_steps_the_outline() {
+        let leaf = |x0: f64, y0: f64, x1: f64, y1: f64, half: f64| {
+            [((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))].map(|(a, b)| Bound { a: DVec2::new(a.0, a.1), b: DVec2::new(b.0, b.1), half })
+        };
+        // an outer leaf round an inner leaf, a cavity of 5 cm between them: one room, not a
+        // second one around it
+        let mut house: Vec<Bound> = leaf(0.0, 0.0, 6.0, 4.0, 0.05).into();
+        house.extend(leaf(0.2, 0.2, 5.8, 3.8, 0.1));
+        assert_eq!(areas(&house), vec![5.4 * 3.4]);
+        // and with a tie across the cavity, which makes a closed strip of it
+        house.push(Bound { a: DVec2::new(0.0, 2.0), b: DVec2::new(0.2, 2.0), half: 0.05 });
+        house.push(Bound { a: DVec2::new(6.0, 2.0), b: DVec2::new(5.8, 2.0), half: 0.05 });
+        assert_eq!(areas(&house), vec![5.4 * 3.4]);
+        // a side of two walls in one line, 100 and 300 thick: the outline steps, it does not
+        // shoot away to where the two faces would cross
+        let mut room = vec![wall((6.0, 0.0), (6.0, 4.0)), wall((6.0, 4.0), (0.0, 4.0)), wall((0.0, 4.0), (0.0, 0.0))];
+        room.push(Bound { a: DVec2::new(0.0, 0.0), b: DVec2::new(3.0, 0.0), half: 0.05 });
+        room.push(Bound { a: DVec2::new(3.0, 0.0), b: DVec2::new(6.0, 0.0), half: 0.15 });
+        let found = regions(&room);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].iter().all(|p| p.x > 0.0 && p.x < 6.0 && p.y > 0.0 && p.y < 4.0), "{:?}", found[0]);
+        assert!((signed_area(&found[0]) - (5.8 * 3.9 - 2.9 * 0.05 - 2.9 * 0.15)).abs() < 1e-9, "{}", signed_area(&found[0]));
     }
 
     #[test]

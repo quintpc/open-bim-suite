@@ -158,7 +158,9 @@ impl App {
                 body = body.push(form);
                 continue;
             }
-            let mut item = row![name, elevation, underlay].spacing(6).align_y(Center);
+            // the name on a line of its own: beside the height and the buttons a long one
+            // ("03 derde verdieping") was left a few pixels and broke letter by letter
+            let mut item = row![elevation, iced::widget::space::horizontal(), underlay].spacing(6).align_y(Center);
             item = item.push(self.level_edit_button(&level.path, p, l));
             if level.added {
                 let close = svg(svg::Handle::from_memory(openaec_ui::icons::Icon::Close.bytes()))
@@ -169,7 +171,7 @@ impl App {
                     button(close).padding(3).style(move |_, s| p.row_button(s)).on_press(Message::RemoveLevel(Arc::from(level.path.as_str()))),
                 );
             }
-            body = body.push(container(item).padding([4, 8]).width(Fill));
+            body = body.push(container(column![name, item].spacing(2)).padding([4, 8]).width(Fill));
             if let Some(rows) = self.underlay_rows(&level.path, p, l) {
                 body = body.push(rows);
             }

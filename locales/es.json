@@ -2055,6 +2055,8 @@
     "appliances": "aparatos",
     "Network length": "Longitud de la red",
     "Select network": "Seleccionar red",
-    "Fall (1:n)": "Pendiente (1:n)"
+    "Fall (1:n)": "Pendiente (1:n)",
+    "Cancel sketch": "Cancelar boceto",
+    "Finish sketch": "Terminar boceto"
   }
 }

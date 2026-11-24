@@ -234,6 +234,12 @@ pub struct Modeller {
     pub level_edit: Option<levels::LevelEdit>,
     /// The level worked on when no floor plan is shown (its path): PageUp and PageDown step it.
     pub level: Option<String>,
+    /// The point a click stands for when it was given in metres and not by the cursor
+    /// (see `place_model_point`).
+    pub exact: Option<DVec3>,
+    /// The regions the walls of each level close in, as last found: the walls they were found
+    /// for and the regions (see `spaces`).
+    pub regions: std::cell::RefCell<Vec<(Vec<spaces::Bound>, Vec<Vec<DVec2>>)>>,
     /// The Grid tool is on: two clicks draw a grid line (see `grids`).
     pub grid_tool: bool,
     /// The reinforcement tool that is on (see `rebar`), and the element its first click was on:
@@ -437,6 +443,9 @@ impl App {
         self.modeller.cursor = None;
         self.modeller.aim = None;
         self.modeller.placement.last_wall = None;
+        // what was being typed in a field of the strip was the tool's before: the same field of
+        // the next tool shows its own value, not that text
+        self.modeller.placement.typing = None;
         self.modeller.refusal = None;
         if self.modeller.tool.is_some() {
             self.measure.tool = None;
@@ -737,16 +746,34 @@ impl App {
     }
 
     /// Project a metric work-plane point onto the active viewport, then use the GUI placement path.
-    pub(crate) fn place_model_point(&mut self, x: f64, y: f64) -> Result<serde_json::Value, String> {
+    pub(crate) fn place_model_point(&mut self, x: f64, y: f64, rotation: Option<f64>) -> Result<serde_json::Value, String> {
         if !self.annotates || !self.modeller.in_modeller || self.active_doc_tab() != 0 { return Err("Open the Modeller 3D view first".into()) }
+        // a sketch that is open takes the point: of a floor's outline, in plan
+        if let Some(sketch) = &self.modeller.sketch {
+            if sketch.face.is_some() { return Err("The sketch open lies on a wall: its points are clicked in the viewport (pick)".into()) }
+            let lines = self.sketch_place_at(DVec2::new(x, y)).ok_or("The sketch tool that is on takes no points: press Line, Rectangle, Circle or Arc first")?;
+            return Ok(serde_json::json!({"point": [x, y, self.work_plane().0], "snap": null, "created": [], "sketch_lines": lines}));
+        }
         let (tool, _) = self.modeller.tool.ok_or("Choose a modelling tool in the ribbon first")?;
-        if tool.opens() { return Err("Pick the host face in the viewport for an opening".into()) }
+        if tool.opens() {
+            // a door or a window with the way its width runs given: it stands there, its foot's
+            // middle at the point, and cuts the walls it stands in
+            let degrees = rotation.ok_or("A door or a window is clicked on a wall in the viewport (pick), or placed here with rotation: the way its width runs, in degrees from the x axis")?;
+            let before = self.modeller.model.iter().map(|e| e.id.0).max().unwrap_or(0);
+            self.place_opening_at(tool, x, y, degrees.to_radians());
+            if let Some(reason) = self.modeller.refusal { return Err(reason.reason().into()) }
+            let created: Vec<_> = self.modeller.model.iter().filter(|e| e.id.0 > before).map(|e| e.id.0).collect();
+            return Ok(serde_json::json!({"point": [x, y, self.work_plane().0], "snap": null, "created": created}));
+        }
         let (z, _, _) = self.work_plane();
         let (w, h) = self.viewport_size;
         let target = DVec3::new(x, y, z);
         let (px, py) = self.on_screen(target, w, h).filter(|(a,b)| (0.0..w).contains(a) && (0.0..h).contains(b)).ok_or("Point outside the current viewport")?;
         let before = self.modeller.model.iter().map(|e| e.id.0).max().unwrap_or(0);
-        let (point, snap) = self.click_work_plane(tool, px, py, w, h).ok_or("The work plane is edge-on")?;
+        self.modeller.exact = Some(target);
+        let clicked = self.click_work_plane(tool, px, py, w, h);
+        self.modeller.exact = None;
+        let (point, snap) = clicked.ok_or("The work plane is edge-on")?;
         if let Some(reason) = self.modeller.refusal { return Err(reason.reason().into()) }
         let created: Vec<_> = self.modeller.model.iter().filter(|e| e.id.0 > before).map(|e| e.id.0).collect();
         Ok(serde_json::json!({"point": point.to_array(), "snap": snap.map(|s| s.label(openaec_ui::Language::English)), "created": created}))
@@ -766,6 +793,12 @@ impl App {
         let (z, _, level) = self.work_plane();
         let p = self.plane_point(x, y, width, height, z)?;
         let (p, snap) = self.snapped_as(p, x, y, width, height);
+        // a point given in metres (see `place_model_point`) is taken as given where no snap
+        // moved it: the way through the screen and back costs it its last digits
+        let p = match self.modeller.exact.take() {
+            Some(given) if snap.is_none() && p.distance(given) < 1e-4 => given,
+            _ => p,
+        };
         // walls as a rectangle: the second click is the opposite corner, and four walls go
         // round, each from the end of the one before, as a chain does
         if tool == ModelTool::Wall && self.modeller.placement.rectangle {

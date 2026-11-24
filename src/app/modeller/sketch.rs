@@ -707,6 +707,20 @@ impl App {
         ((sx - x).hypot(sy - y) <= reach).then_some((index, at))
     }
 
+    /// A point of the sketch given in metres (see `place_model_point`): the tool on takes it as
+    /// it takes a click there, the point as given and not rounded to the centimetre a cursor is
+    /// rounded to. Gives the number of lines the sketch has then; None when no sketch is open or
+    /// its tool takes no points.
+    pub(in crate::app) fn sketch_place_at(&mut self, p: DVec2) -> Option<usize> {
+        let sketch = self.modeller.sketch.as_mut()?;
+        if !matches!(sketch.tool, SketchTool::Line | SketchTool::Rectangle | SketchTool::Circle | SketchTool::Arc | SketchTool::Path) {
+            return None;
+        }
+        self.modeller.refusal = None;
+        sketch.place(p);
+        Some(sketch.segments.len())
+    }
+
     /// A click in the viewport while the sketch is open. False when none is.
     pub(in crate::app) fn sketch_click(&mut self, x: f32, y: f32, width: f32, height: f32) -> bool {
         let Some(tool) = self.modeller.sketch.as_ref().map(|s| s.tool) else { return false };
@@ -1153,7 +1167,9 @@ impl App {
         use crate::app::Message;
         use iced::widget::{button, container, text, Row};
         let sketch = self.modeller.sketch.as_ref()?;
-        let tool = |label: &'static str, key: char, on: bool| button(text(label).size(12)).padding([3, 10]).style(move |_, s| p.ribbon_button(on, s)).on_press(Message::EditKey(key));
+        // each button under its name, so it is found by it (a screen reader, a remote click)
+        use openaec_ui::design::a11y::{node as named, Node, Role};
+        let tool = |label: &'static str, key: char, on: bool| named(button(text(label).size(12)).padding([3, 10]).style(move |_, s| p.ribbon_button(on, s)).on_press(Message::EditKey(key)), Node::new(Role::ToggleButton, label).checked(on));
         let is = |t: SketchTool| sketch.tool == t;
         let bar = Row::new()
             .spacing(4)
@@ -1166,8 +1182,8 @@ impl App {
             .push(tool(l.text("Trimmen (T)", "Trim (T)"), 't', is(SketchTool::Trim)))
             .push(sketch.stair.then(|| tool(l.text("Looplijn (P)", "Climb line (P)"), 'p', is(SketchTool::Path))))
             .push(self.sketch_slope_row(p, l))
-            .push(button(text(l.text("Klaar (Tab)", "Finish (Tab)")).size(12)).padding([3, 10]).style(move |_, s| p.ribbon_button(false, s)).on_press(Message::EditMode))
-            .push(button(text(l.text("Annuleren", "Cancel")).size(12)).padding([3, 10]).style(move |_, s| p.ribbon_button(false, s)).on_press(Message::SketchCancel));
+            .push(named(button(text(l.text("Klaar (Tab)", "Finish (Tab)")).size(12)).padding([3, 10]).style(move |_, s| p.ribbon_button(false, s)).on_press(Message::EditMode), Node::new(Role::Button, l.text("Schets klaar", "Finish sketch"))))
+            .push(named(button(text(l.text("Annuleren", "Cancel")).size(12)).padding([3, 10]).style(move |_, s| p.ribbon_button(false, s)).on_press(Message::SketchCancel), Node::new(Role::Button, l.text("Schets annuleren", "Cancel sketch"))));
         Some(container(bar.wrap()).padding([2, 8]).into())
     }
 

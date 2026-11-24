@@ -178,7 +178,7 @@ pub struct Placement {
     pub chain: bool,
     /// The Wall tool draws a rectangle of four walls with two clicks.
     pub rectangle: bool,
-    typing: Option<(PlaceField, String)>,
+    pub(super) typing: Option<(PlaceField, String)>,
     /// The wall placed last while chaining: the next one on a face meets it where their axes cross.
     pub last_wall: Option<ElementId>,
 }
@@ -655,6 +655,12 @@ impl App {
             let value = match &typing {
                 Some((f, typed)) if *f == field => typed.clone(),
                 _ if counted => String::new(),
+                // a typed wall or floor is as thick as its type's layers together: the field
+                // says that, not what was typed before the type was picked
+                _ if fixed && matches!(tool, ModelTool::Wall | ModelTool::Slab) => match s.kind.as_deref().and_then(|id| bim_core::BuildUpDef::from_library(&self.library, id)) {
+                    Some(build_up) => format!("{:.3}", build_up.layers.iter().map(|layer| layer.thickness).sum::<f64>()),
+                    None => shown(&s, field),
+                },
                 _ => shown(&s, field),
             };
             let hint = if field == PlaceField::Height { l.text("tot niveau", "to level") } else if counted { l.text("uit hoogte", "from height") } else { "" };

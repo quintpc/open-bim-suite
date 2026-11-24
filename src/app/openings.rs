@@ -125,6 +125,23 @@ impl App {
             Err(refusal) => self.modeller.refusal = Some(refusal),
         }
     }
+
+    /// A door or a window of `tool` placed by its numbers and not by a click: the middle of its
+    /// foot at (x, y) on the level worked on (a window its sill above it), its width running at
+    /// `rotation` (radians from the x axis), with the sizes of the strip. It cuts the walls it
+    /// stands in, as one clicked does.
+    pub(super) fn place_opening_at(&mut self, tool: ModelTool, x: f64, y: f64, rotation: f64) {
+        let kind = if tool == ModelTool::Door { OpeningKind::Door } else { OpeningKind::Window };
+        let (z, _, level) = self.work_plane();
+        let s = self.modeller.placement.of(tool);
+        let (h, sill) = (s.height.unwrap_or(if tool == ModelTool::Door { DOOR.1 } else { WINDOW.1 }), if tool == ModelTool::Door { 0.0 } else { s.sill });
+        let def = PointDef { at: DVec3::new(x, y, z + sill), rotation, size: DVec3::new(s.width, LEAF, h), opening: Some(kind), role: Default::default() };
+        let name = self.modeller.tool.map_or("Door", |(_, name)| name);
+        match self.add_element(name, level, Shape::Point(def)) {
+            Ok(_) => self.modeller.refusal = None,
+            Err(refusal) => self.modeller.refusal = Some(refusal),
+        }
+    }
 }
 
 /// Where a ray from `o` along `d` enters the box from `lo` to `hi` (as a multiple of `d`), if it

@@ -2055,6 +2055,8 @@
     "appliances": "appareils",
     "Network length": "Longueur du réseau",
     "Select network": "Sélectionner le réseau",
-    "Fall (1:n)": "Pente (1:n)"
+    "Fall (1:n)": "Pente (1:n)",
+    "Cancel sketch": "Annuler l'esquisse",
+    "Finish sketch": "Terminer l'esquisse"
   }
 }

@@ -2055,6 +2055,8 @@
     "appliances": "cihaz",
     "Network length": "Ağ uzunluğu",
     "Select network": "Ağı seç",
-    "Fall (1:n)": "Eğim (1:n)"
+    "Fall (1:n)": "Eğim (1:n)",
+    "Cancel sketch": "Eskizi iptal et",
+    "Finish sketch": "Eskizi bitir"
   }
 }

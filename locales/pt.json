@@ -2055,6 +2055,8 @@
     "appliances": "aparelhos",
     "Network length": "Comprimento da rede",
     "Select network": "Selecionar rede",
-    "Fall (1:n)": "Inclinação (1:n)"
+    "Fall (1:n)": "Inclinação (1:n)",
+    "Cancel sketch": "Cancelar esboço",
+    "Finish sketch": "Concluir esboço"
   }
 }
