@@ -2054,6 +2054,7 @@
     "fittings": "accesorios",
     "appliances": "aparatos",
     "Network length": "Longitud de la red",
-    "Select network": "Seleccionar red"
+    "Select network": "Seleccionar red",
+    "Fall (1:n)": "Pendiente (1:n)"
   }
 }

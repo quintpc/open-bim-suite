@@ -2054,6 +2054,7 @@
     "fittings": "raccords",
     "appliances": "appareils",
     "Network length": "Longueur du réseau",
-    "Select network": "Sélectionner le réseau"
+    "Select network": "Sélectionner le réseau",
+    "Fall (1:n)": "Pente (1:n)"
   }
 }

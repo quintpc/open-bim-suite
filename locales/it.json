@@ -2054,6 +2054,7 @@
     "fittings": "raccordi",
     "appliances": "apparecchi",
     "Network length": "Lunghezza della rete",
-    "Select network": "Seleziona rete"
+    "Select network": "Seleziona rete",
+    "Fall (1:n)": "Pendenza (1:n)"
   }
 }

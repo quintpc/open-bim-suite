@@ -97,6 +97,8 @@ pub enum ElementField {
     /// (counted from 1).
     Slope,
     Eave,
+    /// A pipe's fall, as the n of 1:n (0: level): how far it runs for every metre it drops.
+    Fall,
 }
 
 /// A door's and a window's size and sill when added (metres).
@@ -279,6 +281,7 @@ fn value(shape: &Shape, field: ElementField) -> Option<f64> {
             _ => None,
         },
         (Shape::Linear(l), F::Turn) => Some(l.roll.to_degrees()),
+        (Shape::Linear(l), F::Fall) => fall(l),
         (Shape::Planar(PlanarDef { form: PlanarForm::Wall { height, .. }, .. }), F::Height) => Some(*height),
         (Shape::Planar(PlanarDef { form: PlanarForm::Wall { base, .. }, .. }), F::Base) => Some(*base),
         (Shape::Planar(PlanarDef { form: PlanarForm::Slab { top, .. }, .. }), F::Base) => Some(*top),
@@ -345,6 +348,16 @@ fn value(shape: &Shape, field: ElementField) -> Option<f64> {
 
 /// The openings of `shape` and how long it is, if it can have openings: a wall, or a system whose
 /// type is framed (a timber frame).
+/// The fall of a pipe that does not stand upright, as the n of 1:n; 0 when it lies level.
+fn fall(l: &bim_core::LinearDef) -> Option<f64> {
+    let run = (l.end - l.start).truncate().length();
+    if l.role != bim_core::LinearRole::Pipe || run < 1e-6 {
+        return None;
+    }
+    let drop = (l.end.z - l.start.z).abs();
+    Some(if drop < 1e-9 { 0.0 } else { run / drop })
+}
+
 fn openings_of(shape: &Shape) -> Option<(&[Opening], f64)> {
     match shape {
         Shape::Planar(PlanarDef { form: PlanarForm::Wall { start, end, .. }, openings, .. }) => Some((openings, (end - start).length())),
@@ -386,6 +399,15 @@ fn with_value(shape: &Shape, field: ElementField, v: f64) -> Option<Shape> {
             _ => return None,
         },
         (Shape::Linear(l), F::Turn) => l.roll = v.to_radians(),
+        // its high end stays where it is, its low end drops (the end, when it lies level)
+        (Shape::Linear(l), F::Fall) if v >= 0.0 && fall(l).is_some() => {
+            let drop = if v > 0.0 { (l.end - l.start).truncate().length() / v } else { 0.0 };
+            if l.end.z > l.start.z {
+                l.start.z = l.end.z - drop;
+            } else {
+                l.end.z = l.start.z - drop;
+            }
+        }
         (Shape::Planar(PlanarDef { form: PlanarForm::Wall { height, .. }, .. }), F::Height) => set(height),
         (Shape::Planar(PlanarDef { form: PlanarForm::Wall { base, .. }, .. }), F::Base) => set(base),
         (Shape::Planar(PlanarDef { form: PlanarForm::Slab { top, .. }, .. }), F::Base) => set(top),
@@ -478,7 +500,7 @@ impl App {
         }
         let digits = match field {
             ElementField::Turn | ElementField::Slope => 1,
-            ElementField::BoltRows | ElementField::Eave | ElementField::TopBars | ElementField::BottomBars => 0,
+            ElementField::BoltRows | ElementField::Eave | ElementField::Fall | ElementField::TopBars | ElementField::BottomBars => 0,
             _ => 3,
         };
         if let Some(v) = extra_value(&e.extras, field) {
@@ -887,7 +909,7 @@ impl App {
             rows = rows.push(button(text(l.text("Markeren als wapeningsstaaf", "Mark as reinforcing bar")).size(12)).on_press(Message::DesignateReinforcement));
         }
         let has = |f: F| value(&shape, f).is_some();
-        let fields: [(F, &str); 12] = [
+        let fields: [(F, &str); 13] = [
             (F::Height, l.text("Hoogte (m)", "Height (m)")),
             (F::Risers, l.text("Aantal optreden", "Risers")),
             (F::Thickness, l.text("Dikte (m)", "Thickness (m)")),
@@ -898,6 +920,7 @@ impl App {
             (F::Turn, l.text("Draaiing (°)", "Turn (°)")),
             (F::Slope, l.text("Helling (°)", "Slope (°)")),
             (F::Eave, l.text("Dakvoet (rand nr.)", "Eave (edge no.)")),
+            (F::Fall, l.text("Afschot (1:n)", "Fall (1:n)")),
             (F::SpacingAlong, l.text("Raster langs (m)", "Spacing along (m)")),
             (F::SpacingUp, l.text("Raster omhoog (m)", "Spacing up (m)")),
         ];
@@ -1499,7 +1522,7 @@ mod tests {
             wall_selected().modeller.model.get(ElementId(1)).unwrap().shape.clone(),
         ];
         for shape in shapes {
-            for f in [F::Height, F::Thickness, F::Base, F::Width, F::Depth, F::Diameter, F::Turn, F::SpacingAlong, F::SpacingUp] {
+            for f in [F::Height, F::Thickness, F::Base, F::Width, F::Depth, F::Diameter, F::Turn, F::SpacingAlong, F::SpacingUp, F::Fall] {
                 if let Some(v) = value(&shape, f) {
                     let back = with_value(&shape, f, v).unwrap();
                     assert!((value(&back, f).unwrap() - v).abs() < 1e-12, "{f:?}");

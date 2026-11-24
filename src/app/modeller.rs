@@ -819,6 +819,7 @@ impl App {
         }
         // and one from each end that is over or under a connector of an appliance
         let to_connectors = self.risers_to_connectors(tool, &shape);
+        let rise = if let Shape::Linear(l) = &shape { l.end.z - l.start.z } else { 0.0 };
         let connector_level = level.clone();
         // with no height typed, what stands reaches the level above, when there is one
         let storey = matches!(tool, ModelTool::Wall | ModelTool::Column | ModelTool::System) && self.modeller.placement.of(tool).height.is_none() && tops::has_top(&shape);
@@ -835,7 +836,7 @@ impl App {
         }
         match added {
             Ok(_) if tool.service().is_some() => {
-                self.modeller.placement.risen(tool, a.truncate().distance(b.truncate()) < 1e-6);
+                self.modeller.placement.risen(tool, a.truncate().distance(b.truncate()) < 1e-6, rise);
                 // a run that ended on a connector is done: the chain stops there
                 let ended = to_connectors.iter().any(|r| matches!(r, Shape::Linear(l) if (l.start - b).truncate().length() < 1e-6));
                 for riser in to_connectors {
@@ -1240,7 +1241,9 @@ pub(super) fn tool_shape(tool: ModelTool, a: DVec3, b: DVec3, z: f64, storey: f6
             let up = DVec3::Z * (z + s.height.unwrap_or(SERVICE_HEIGHT) - a.z);
             let role = tool.service().unwrap_or_default();
             // its rise takes its end up (a slope; a riser when both clicks are one point)
-            Shape::Linear(LinearDef { start: a + up, end: b + up + DVec3::Z * s.offset, profile: service_profile(tool, s.width, s.depth, s.kind.as_deref().and_then(|id| library.service_type(id)).and_then(|series| series.sizes.iter().find(|size| (size.width-s.width).abs() < 1e-6 && ((size.height-s.depth).abs() < 1e-6 || matches!(tool, ModelTool::Pipe | ModelTool::RoundDuct)))).map(|size| size.wall)), roll: 0.0, role })
+            // and a pipe with a fall drops as it runs: 1 in `sill`
+            let fall = if tool == ModelTool::Pipe && s.sill > 0.0 { a.truncate().distance(b.truncate()) / s.sill } else { 0.0 };
+            Shape::Linear(LinearDef { start: a + up, end: b + up + DVec3::Z * (s.offset - fall), profile: service_profile(tool, s.width, s.depth, s.kind.as_deref().and_then(|id| library.service_type(id)).and_then(|series| series.sizes.iter().find(|size| (size.width-s.width).abs() < 1e-6 && ((size.height-s.depth).abs() < 1e-6 || matches!(tool, ModelTool::Pipe | ModelTool::RoundDuct)))).map(|size| size.wall)), roll: 0.0, role })
         }
         ModelTool::Wall => {
             let base = z + s.offset;

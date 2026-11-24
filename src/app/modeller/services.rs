@@ -141,4 +141,32 @@ mod tests {
         assert_eq!(app.selected_modelled().len(), 7, "a radiator, four pipes and two bends");
         assert_eq!(PointRole::Radiator.class(), "IfcSpaceHeater");
     }
+
+    #[test]
+    fn a_waste_pipe_falls_as_it_runs_and_the_next_goes_on_from_where_it_ended() {
+        use crate::app::placement::PlaceField;
+        let mut app = modelling();
+        app.set_model_tool(Some((ModelTool::Pipe, "Pipe")));
+        app.place_message(PlaceMessage::Service(Some(Service::Waste)));
+        app.place_message(PlaceMessage::Field(PlaceField::Height, "1".into()));
+        // typed as 1:50 or as 50
+        app.place_message(PlaceMessage::Field(PlaceField::Sill, "1:50".into()));
+        click(&mut app, 0.0, 0.0);
+        click(&mut app, 5.0, 0.0);
+        click(&mut app, 5.0, 10.0);
+        let ends: Vec<(f64, f64)> = app.modeller.model.iter().filter_map(|e| if let Shape::Linear(l) = &e.shape { Some((l.start.z, l.end.z)) } else { None }).collect();
+        assert_eq!(ends.len(), 2);
+        assert!((ends[0].0 - 1.0).abs() < 1e-9 && (ends[0].1 - 0.9).abs() < 1e-9, "{ends:?}");
+        assert!((ends[1].0 - 0.9).abs() < 1e-9 && (ends[1].1 - 0.7).abs() < 1e-9, "{ends:?}");
+        assert_eq!(app.modeller.model.iter().filter(|e| e.class() == "IfcPipeFitting").count(), 1, "a bend where it turns");
+        // its fall shows in its properties and is typed there: 1:100 keeps the high end
+        app.set_model_tool(None);
+        let first = app.modeller.model.iter().next().unwrap().id;
+        app.select_modelled(first);
+        let e = app.defined().unwrap().clone();
+        assert_eq!(app.element_field_text(&e, crate::app::element_props::ElementField::Fall), "50");
+        app.type_element_field(crate::app::element_props::ElementField::Fall, "100".into());
+        let Shape::Linear(l) = &app.modeller.model.get(first).unwrap().shape else { panic!() };
+        assert!((l.start.z - 1.0).abs() < 1e-9 && (l.end.z - 0.95).abs() < 1e-9);
+    }
 }

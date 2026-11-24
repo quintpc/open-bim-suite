@@ -2054,6 +2054,7 @@
     "fittings": "bağlantı parçası",
     "appliances": "cihaz",
     "Network length": "Ağ uzunluğu",
-    "Select network": "Ağı seç"
+    "Select network": "Ağı seç",
+    "Fall (1:n)": "Eğim (1:n)"
   }
 }

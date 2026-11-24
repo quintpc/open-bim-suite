@@ -204,14 +204,14 @@ impl Placement {
         self.settings.insert(tool, settings);
     }
 
-    /// A run of a service was placed with a rise: the next one starts at the height it ended
-    /// at. One that went straight up or down (`vertical`) was a riser, so the next runs level.
-    pub(super) fn risen(&mut self, tool: ModelTool, vertical: bool) {
+    /// A run of a service was placed and its end lies `rise` above its start (a rise typed, or a
+    /// pipe's fall): the next one starts at the height it ended at. One that went straight up or down (`vertical`) was a riser, so the next runs level.
+    pub(super) fn risen(&mut self, tool: ModelTool, vertical: bool, rise: f64) {
         let mut s = self.of(tool);
-        if tool.service().is_none() || s.offset == 0.0 {
+        if tool.service().is_none() || rise == 0.0 {
             return;
         }
-        s.height = Some(s.height.unwrap_or(super::modeller::SERVICE_HEIGHT) + s.offset);
+        s.height = Some(s.height.unwrap_or(super::modeller::SERVICE_HEIGHT) + rise);
         if vertical {
             s.offset = 0.0;
         }
@@ -393,7 +393,9 @@ fn fields(tool: ModelTool, l: Language) -> Vec<(PlaceField, &'static str)> {
         ModelTool::System => vec![height, base],
         ModelTool::Point | ModelTool::Appliance => vec![width, depth, height, base],
         ModelTool::Duct | ModelTool::CableTray => vec![width, (F::Depth, l.text("Hoogte", "Height")), (F::Height, l.text("Hart boven niveau", "Centre above level")), (F::Offset, l.text("Stijging", "Rise"))],
-        ModelTool::RoundDuct | ModelTool::Pipe => vec![(F::Width, l.text("Diameter", "Diameter")), (F::Height, l.text("Hart boven niveau", "Centre above level")), (F::Offset, l.text("Stijging", "Rise"))],
+        ModelTool::RoundDuct => vec![(F::Width, l.text("Diameter", "Diameter")), (F::Height, l.text("Hart boven niveau", "Centre above level")), (F::Offset, l.text("Stijging", "Rise"))],
+        // a pipe falls as it runs when a fall is typed: 50 for 1:50
+        ModelTool::Pipe => vec![(F::Width, l.text("Diameter", "Diameter")), (F::Height, l.text("Hart boven niveau", "Centre above level")), (F::Offset, l.text("Stijging", "Rise")), (F::Sill, l.text("Afschot (1:n)", "Fall (1:n)"))],
         ModelTool::Door => vec![width, height],
         ModelTool::Window => vec![width, height, (F::Sill, l.text("Borstwering", "Sill"))],
     }
@@ -429,6 +431,8 @@ fn with_typed(tool: ModelTool, s: &Settings, field: PlaceField, typed: &str) -> 
         s.height = None;
         return storey.then_some(s);
     }
+    // a pipe's fall is typed as 50 or as 1:50
+    let typed = if tool == ModelTool::Pipe && field == PlaceField::Sill { typed.strip_prefix("1:").unwrap_or(typed).trim() } else { typed };
     let v = parse_elevation(typed)?;
     match field {
         PlaceField::Width if v > 0.0 => s.width = v,
