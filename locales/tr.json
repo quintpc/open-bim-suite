@@ -2048,6 +2048,12 @@
     "from height": "yükseklikten",
     "Railing": "Korkuluk",
     "Square only": "Yalnızca dik",
-    "Draw only level and upright from the last point; off: any angle": "Son noktadan yalnızca yatay ve dikey çiz; kapalı: her açı"
+    "Draw only level and upright from the last point; off: any angle": "Son noktadan yalnızca yatay ve dikey çiz; kapalı: her açı",
+    "Connector": "Bağlantı ucu",
+    "Network": "Ağ",
+    "fittings": "bağlantı parçası",
+    "appliances": "cihaz",
+    "Network length": "Ağ uzunluğu",
+    "Select network": "Ağı seç"
   }
 }

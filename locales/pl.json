@@ -2048,6 +2048,12 @@
     "from height": "z wysokości",
     "Railing": "Balustrada",
     "Square only": "Tylko prostopadle",
-    "Draw only level and upright from the last point; off: any angle": "Rysuj tylko poziomo i pionowo od ostatniego punktu; wyłączone: dowolny kąt"
+    "Draw only level and upright from the last point; off: any angle": "Rysuj tylko poziomo i pionowo od ostatniego punktu; wyłączone: dowolny kąt",
+    "Connector": "Przyłącze",
+    "Network": "Sieć",
+    "fittings": "kształtki",
+    "appliances": "urządzenia",
+    "Network length": "Długość sieci",
+    "Select network": "Zaznacz sieć"
   }
 }

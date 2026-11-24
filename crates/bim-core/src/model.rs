@@ -46,6 +46,14 @@ pub struct Model {
     pub(crate) grids: Vec<crate::datum::GridDef>,
 }
 
+/// How near two points are to count as one (metres).
+const TOUCH: f64 = 1e-3;
+
+/// Whether what is of service `a` connects to what is of `b`: the same service, or either of none.
+fn serves(a: Option<crate::element::Service>, b: Option<crate::element::Service>) -> bool {
+    a.is_none() || b.is_none() || a == b
+}
+
 impl Model {
     pub fn new(grid: TileGrid) -> Self {
         Self { grid, elements: BTreeMap::new(), next: 1, grids: Vec::new() }
@@ -125,6 +133,70 @@ impl Model {
         let (p, s) = (self.member(c.primary).ok()?, self.member(c.secondary).ok()?);
         let near = |q| join::to_segment(q, p.start, p.end);
         Some(if near(s.start) <= near(s.end) { s.start } else { s.end })
+    }
+
+    /// The connectors of a point element in the frame of tile (0, 0), each with the run that ends
+    /// on it when one does: a run of the connector's kind and of its service (the appliance's own
+    /// service when the connector has none; a run or a connector of no service takes any).
+    pub fn connectors(&self, id: ElementId) -> Vec<(crate::element::Connector, Option<ElementId>)> {
+        let Some(e) = self.elements.get(&id) else { return Vec::new() };
+        let Shape::Point(p) = &e.shape else { return Vec::new() };
+        let offset = self.grid.origin(e.tile);
+        p.connectors()
+            .into_iter()
+            .map(|mut c| {
+                c.at += offset;
+                c.service = c.service.or(e.service);
+                let run = self.elements.values().find(|r| {
+                    let Ok(l) = self.member(r.id) else { return false };
+                    l.role == c.role && serves(r.service, c.service) && (l.start.distance(c.at) < TOUCH || l.end.distance(c.at) < TOUCH)
+                });
+                (c, run.map(|r| r.id))
+            })
+            .collect()
+    }
+
+    /// The network `id` is part of: the runs of building services that meet, their fittings, and
+    /// the appliances and terminals they end on, `id` among them. Empty for an element that is
+    /// no part of the building services.
+    pub fn network(&self, id: ElementId) -> Vec<ElementId> {
+        let runs: Vec<(ElementId, LinearDef, Option<crate::element::Service>)> =
+            self.elements.values().filter_map(|e| Some((e.id, self.member(e.id).ok().filter(|l| l.role != crate::element::LinearRole::Member)?, e.service))).collect();
+        let is_run = |id: &ElementId| runs.iter().any(|(r, ..)| r == id);
+        // what touches what
+        let mut links: Vec<(ElementId, ElementId)> = Vec::new();
+        for (k, (a, la, sa)) in runs.iter().enumerate() {
+            for (b, lb, sb) in &runs[k + 1..] {
+                let meet = |l: &LinearDef, o: &LinearDef| [l.start, l.end].into_iter().any(|q| join::to_segment(q, o.start, o.end) < TOUCH);
+                if la.role == lb.role && serves(*sa, *sb) && (meet(la, lb) || meet(lb, la)) {
+                    links.push((*a, *b));
+                }
+            }
+        }
+        for e in self.elements.values() {
+            match &e.shape {
+                Shape::Connection(c) if is_run(&c.primary) && is_run(&c.secondary) => links.extend([(e.id, c.primary), (e.id, c.secondary)]),
+                Shape::Point(_) => links.extend(self.connectors(e.id).into_iter().filter_map(|(_, run)| Some((e.id, run?)))),
+                _ => {}
+            }
+        }
+        if !links.iter().any(|(a, b)| *a == id || *b == id) {
+            return if is_run(&id) { vec![id] } else { Vec::new() };
+        }
+        let mut found = vec![id];
+        let mut next = 0;
+        while next < found.len() {
+            let at = found[next];
+            next += 1;
+            for (a, b) in &links {
+                let other = if *a == at { *b } else if *b == at { *a } else { continue };
+                if !found.contains(&other) {
+                    found.push(other);
+                }
+            }
+        }
+        found.sort();
+        found
     }
 
     /// Keeps the joins of linear elements up to date, as a model is drawn and changed:
@@ -1141,5 +1213,48 @@ mod tests {
         // it is kept when the element is written and read
         let read: Element = serde_json::from_str(&serde_json::to_string(m.get(added[0]).unwrap()).unwrap()).unwrap();
         assert_eq!(read.service, Some(Service::SupplyAir));
+    }
+    fn pipe(start: DVec3, end: DVec3) -> Shape {
+        let shape = bim_library::ProfileShape::Chs { d: 0.022, t: 0.001 };
+        Shape::Linear(LinearDef { start, end, profile: ProfileDef::Catalogue { designation: "Ø22".into(), shape }, roll: 0.0, role: crate::element::LinearRole::Pipe })
+    }
+
+    #[test]
+    fn an_appliance_has_connectors_and_a_run_ending_on_one_is_of_its_network() {
+        use crate::element::{PointRole, Service};
+        let mut m = Model::new(TileGrid::default());
+        let boiler = add(&mut m, Shape::Point(PointDef { at: DVec3::new(0.0, 0.0, 1.2), rotation: 0.0, size: DVec3::new(0.5, 0.3, 0.7), opening: None, role: PointRole::Boiler }));
+        let found = m.connectors(boiler);
+        assert_eq!(found.len(), 6, "five pipes below and the flue on top");
+        assert!(found.iter().all(|(_, run)| run.is_none()));
+        // its block and a stub at every connector
+        assert_eq!(m.evaluate(boiler).unwrap().len(), 7);
+        let cold = found.iter().find(|(c, _)| c.service == Some(Service::ColdWater)).unwrap().0;
+        assert!((cold.at - DVec3::new(0.09, 0.0, 1.2)).length() < 1e-9 && cold.out == -DVec3::Z);
+        // a cold water pipe up to it, a pipe on from that one, and one apart
+        let served = |m: &mut Model, shape: Shape, service: Service| {
+            let grid = m.grid;
+            let mut e = Element::in_project(&grid, "p", None, shape);
+            e.service = Some(service);
+            m.add(e).unwrap()
+        };
+        let riser = served(&mut m, pipe(DVec3::new(0.09, 0.0, 0.2), cold.at), Service::ColdWater);
+        let feed = served(&mut m, pipe(DVec3::new(3.0, 0.0, 0.2), DVec3::new(0.09, 0.0, 0.2)), Service::ColdWater);
+        let apart = served(&mut m, pipe(DVec3::new(3.0, 2.0, 0.2), DVec3::new(0.0, 2.0, 0.2)), Service::ColdWater);
+        // a hot water pipe ending on the cold connector does not connect
+        let hot = served(&mut m, pipe(DVec3::new(0.09, -2.0, 1.2), cold.at), Service::HotWater);
+        let (added, _) = m.update_joins("Joint", None);
+        let on: Vec<_> = m.connectors(boiler).into_iter().filter_map(|(c, run)| Some((c.service?, run?))).collect();
+        assert_eq!(on, vec![(Service::ColdWater, riser)]);
+        let network = m.network(boiler);
+        assert!(network.contains(&riser) && network.contains(&feed) && network.contains(&boiler));
+        assert!(added.iter().any(|j| network.contains(j)), "the bend between them too");
+        assert!(!network.contains(&apart) && !network.contains(&hot));
+        assert_eq!(m.network(feed), network);
+        assert_eq!(m.network(apart), vec![apart]);
+        // turned a quarter, its connectors turn with it
+        let turned = PointDef { at: DVec3::ZERO, rotation: std::f64::consts::FRAC_PI_2, size: DVec3::new(1.0, 0.1, 0.6), opening: None, role: PointRole::Radiator };
+        let c = turned.connectors();
+        assert!((c[0].at - DVec3::new(0.0, -0.5, 0.06)).length() < 1e-9 && (c[0].out - DVec3::new(0.0, -1.0, 0.0)).length() < 1e-9);
     }
 }

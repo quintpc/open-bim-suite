@@ -2048,6 +2048,12 @@
     "from height": "dall'altezza",
     "Railing": "Ringhiera",
     "Square only": "Solo ortogonale",
-    "Draw only level and upright from the last point; off: any angle": "Disegna solo in orizzontale e in verticale dall'ultimo punto; spento: qualsiasi angolo"
+    "Draw only level and upright from the last point; off: any angle": "Disegna solo in orizzontale e in verticale dall'ultimo punto; spento: qualsiasi angolo",
+    "Connector": "Attacco",
+    "Network": "Rete",
+    "fittings": "raccordi",
+    "appliances": "apparecchi",
+    "Network length": "Lunghezza della rete",
+    "Select network": "Seleziona rete"
   }
 }

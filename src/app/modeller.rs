@@ -28,6 +28,7 @@ pub(super) mod file_types;
 pub mod key_actions;
 pub mod keys;
 pub mod select;
+pub mod services;
 pub mod levels;
 pub(super) mod shape_handles;
 pub mod slab_handles;
@@ -547,6 +548,10 @@ impl App {
             }
         };
         let (mut corners, mut middles) = (Vec::new(), Vec::new());
+        // a run of a building service lands on the open connectors of its kind and service
+        if let Some((tool, _)) = self.modeller.tool {
+            corners.extend(self.open_connectors(tool).into_iter().map(|c| c.at));
+        }
         for e in self.modeller.model.iter().filter(|e| e.id != except) {
             match e.shape_in_project(&grid) {
                 Shape::Point(p) => corners.push(p.at),
@@ -808,10 +813,13 @@ impl App {
         }
         let name = self.placed_name(tool, name);
         // a run of a service starting where one ends at another height: a riser between them
-        let service = self.modeller.placement.of(tool).service.filter(|v| tool == ModelTool::Appliance || Some(v.role()) == tool.service());
+        let service = self.tool_service(tool);
         if let Some(riser) = self.riser_to(tool, service, &shape) {
             let _ = self.add_element_served(name, level.clone(), None, service, riser);
         }
+        // and one from each end that is over or under a connector of an appliance
+        let to_connectors = self.risers_to_connectors(tool, &shape);
+        let connector_level = level.clone();
         // with no height typed, what stands reaches the level above, when there is one
         let storey = matches!(tool, ModelTool::Wall | ModelTool::Column | ModelTool::System) && self.modeller.placement.of(tool).height.is_none() && tops::has_top(&shape);
         let top = if storey { self.level_above(level.as_deref()).map(|level| bim_core::Top { level, offset: 0.0 }) } else { None };
@@ -828,7 +836,12 @@ impl App {
         match added {
             Ok(_) if tool.service().is_some() => {
                 self.modeller.placement.risen(tool, a.truncate().distance(b.truncate()) < 1e-6);
-                if self.modeller.placement.chain {
+                // a run that ended on a connector is done: the chain stops there
+                let ended = to_connectors.iter().any(|r| matches!(r, Shape::Linear(l) if (l.start - b).truncate().length() < 1e-6));
+                for riser in to_connectors {
+                    let _ = self.add_element_served(name, connector_level.clone(), None, service, riser);
+                }
+                if self.modeller.placement.chain && !ended {
                     self.modeller.points = vec![b];
                 }
             }

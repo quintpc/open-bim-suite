@@ -2048,6 +2048,12 @@
     "from height": "från höjden",
     "Railing": "Räcke",
     "Square only": "Endast vinkelrätt",
-    "Draw only level and upright from the last point; off: any angle": "Rita bara vågrätt och lodrätt från den senaste punkten; av: valfri vinkel"
+    "Draw only level and upright from the last point; off: any angle": "Rita bara vågrätt och lodrätt från den senaste punkten; av: valfri vinkel",
+    "Connector": "Anslutning",
+    "Network": "Nät",
+    "fittings": "rördelar",
+    "appliances": "apparater",
+    "Network length": "Nätets längd",
+    "Select network": "Markera nät"
   }
 }

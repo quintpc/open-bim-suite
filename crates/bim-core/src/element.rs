@@ -1378,6 +1378,98 @@ pub fn point_solid(p: &PointDef) -> Result<Solid, Refusal> {
     Solid::extrude(&Profile::rectangle(p.size.x, p.size.y)?, &axes, p.size.z)
 }
 
+/// Where a run of a building service connects to an appliance or a terminal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Connector {
+    pub at: DVec3,
+    /// The way a run leaves it (a unit vector).
+    pub out: DVec3,
+    /// The kind of run it takes.
+    pub role: LinearRole,
+    /// The service it is of; with none it takes the service of its appliance (the two sides of a
+    /// pump or a valve).
+    pub service: Option<Service>,
+    /// The diameter of its stub.
+    pub size: f64,
+}
+
+/// How far a connector's stub stands out of its appliance.
+pub const STUB: f64 = 0.04;
+
+impl PointRole {
+    /// Its connectors in the box of its element: where (across the width and the depth from
+    /// −0.5 to 0.5, up the height from 0 to 1), the way out, and what connects.
+    fn connections(self) -> &'static [([f64; 3], [f64; 3], LinearRole, Option<Service>)] {
+        use LinearRole::{Duct, Pipe};
+        const LEFT: [f64; 3] = [-1.0, 0.0, 0.0];
+        const RIGHT: [f64; 3] = [1.0, 0.0, 0.0];
+        const BACK: [f64; 3] = [0.0, 1.0, 0.0];
+        const DOWN: [f64; 3] = [0.0, 0.0, -1.0];
+        const UP: [f64; 3] = [0.0, 0.0, 1.0];
+        match self {
+            PointRole::Object | PointRole::Outlet | PointRole::Light => &[],
+            PointRole::Radiator => &[([-0.5, 0.0, 0.1], LEFT, Pipe, Some(Service::HeatingSupply)), ([0.5, 0.0, 0.1], RIGHT, Pipe, Some(Service::HeatingReturn))],
+            PointRole::Boiler => &[
+                ([-0.36, 0.0, 0.0], DOWN, Pipe, Some(Service::HeatingSupply)),
+                ([-0.18, 0.0, 0.0], DOWN, Pipe, Some(Service::HotWater)),
+                ([0.0, 0.0, 0.0], DOWN, Pipe, Some(Service::Gas)),
+                ([0.18, 0.0, 0.0], DOWN, Pipe, Some(Service::ColdWater)),
+                ([0.36, 0.0, 0.0], DOWN, Pipe, Some(Service::HeatingReturn)),
+                ([0.0, 0.0, 1.0], UP, Duct, Some(Service::ExhaustAir)),
+            ],
+            PointRole::Pump | PointRole::Valve => &[([-0.5, 0.0, 0.5], LEFT, Pipe, None), ([0.5, 0.0, 0.5], RIGHT, Pipe, None)],
+            PointRole::Fan => &[([-0.5, 0.0, 0.5], LEFT, Duct, None), ([0.5, 0.0, 0.5], RIGHT, Duct, None)],
+            PointRole::AirHandlingUnit => &[
+                ([-0.5, -0.25, 0.5], LEFT, Duct, Some(Service::ReturnAir)),
+                ([-0.5, 0.25, 0.5], LEFT, Duct, Some(Service::ExhaustAir)),
+                ([0.5, 0.25, 0.5], RIGHT, Duct, Some(Service::SupplyAir)),
+            ],
+            PointRole::AirTerminal => &[([0.0, 0.0, 1.0], UP, Duct, None)],
+            PointRole::Sanitary => &[
+                ([-0.25, 0.5, 0.8], BACK, Pipe, Some(Service::ColdWater)),
+                ([0.25, 0.5, 0.8], BACK, Pipe, Some(Service::HotWater)),
+                ([0.0, 0.5, 0.2], BACK, Pipe, Some(Service::Waste)),
+            ],
+            PointRole::Tank => &[([0.5, 0.0, 0.1], RIGHT, Pipe, Some(Service::ColdWater)), ([0.0, 0.0, 1.0], UP, Pipe, Some(Service::HotWater))],
+        }
+    }
+}
+
+impl PointDef {
+    /// Its connectors: where the runs of the building services connect to it, by its role. A
+    /// door, a window or an object has none.
+    pub fn connectors(&self) -> Vec<Connector> {
+        if self.opening.is_some() {
+            return Vec::new();
+        }
+        let (sin, cos) = self.rotation.sin_cos();
+        let turned = |v: DVec3| DVec3::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos, v.z);
+        self.role
+            .connections()
+            .iter()
+            .map(|(at, out, role, service)| {
+                let out = DVec3::from_array(*out);
+                // the stub fits the face it stands on
+                let face = [self.size.x, self.size.y, self.size.z].into_iter().zip(out.to_array()).filter(|(_, o)| o.abs() < 0.5).map(|(s, _)| s).fold(f64::INFINITY, f64::min);
+                let widest: f64 = if *role == LinearRole::Duct { 0.25 } else { 0.04 };
+                Connector { at: self.at + turned(DVec3::from_array(*at) * self.size), out: turned(out), role: *role, service: *service, size: widest.min(0.6 * face) }
+            })
+            .collect()
+    }
+}
+
+/// The stubs of a point element's connectors: a short round piece standing out of it at each.
+fn stub_solids(p: &PointDef) -> Vec<Solid> {
+    p.connectors()
+        .into_iter()
+        .filter_map(|c| {
+            let across = if c.out.z.abs() > 0.5 { DVec3::X } else { DVec3::Z };
+            let axes = Axes::new(c.at, across, c.out).ok()?;
+            Solid::extrude(&Profile::circle(c.size).ok()?, &axes, STUB).ok()
+        })
+        .collect()
+}
+
 /// How wide the members of a door or window frame are, how deep at least, and how thick a pane.
 pub const FRAME_WIDTH: f64 = 0.06;
 pub const FRAME_DEPTH: f64 = 0.09;
@@ -1387,7 +1479,10 @@ pub const PANE: f64 = 0.02;
 /// it, a leaf or a pane of glass (marked true). One too small for a frame is a single block.
 pub fn opening_solids(p: &PointDef) -> Result<Vec<(Solid, bool)>, Refusal> {
     let (w, h, f) = (p.size.x, p.size.z, FRAME_WIDTH);
-    let Some(kind) = p.opening.filter(|_| w > 3.0 * f && h > 3.0 * f) else { return Ok(vec![(point_solid(p)?, false)]) };
+    let Some(kind) = p.opening.filter(|_| w > 3.0 * f && h > 3.0 * f) else {
+        // a block, and the stubs of its connectors when it is an appliance
+        return Ok(std::iter::once(point_solid(p)?).chain(stub_solids(p)).map(|solid| (solid, false)).collect());
+    };
     let depth = p.size.y.max(FRAME_DEPTH);
     let (sin, cos) = p.rotation.sin_cos();
     let along = DVec3::new(cos, sin, 0.0);

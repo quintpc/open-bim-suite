@@ -2048,6 +2048,12 @@
     "from height": "pela altura",
     "Railing": "Guarda-corpo",
     "Square only": "Só ortogonal",
-    "Draw only level and upright from the last point; off: any angle": "Desenhar só na horizontal e na vertical a partir do último ponto; desligado: qualquer ângulo"
+    "Draw only level and upright from the last point; off: any angle": "Desenhar só na horizontal e na vertical a partir do último ponto; desligado: qualquer ângulo",
+    "Connector": "Ligação",
+    "Network": "Rede",
+    "fittings": "acessórios",
+    "appliances": "aparelhos",
+    "Network length": "Comprimento da rede",
+    "Select network": "Selecionar rede"
   }
 }

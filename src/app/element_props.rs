@@ -1170,6 +1170,8 @@ impl App {
                 rows = rows.push(draw);
             }
         }
+        // a run, a fitting or an appliance of the building services: its connectors and its network
+        rows = self.service_rows(e, rows, p, l);
         let base = match e.base() {
             bim_core::BaseKind::Point => l.text("Puntvormig", "Point"),
             bim_core::BaseKind::Linear => l.text("Lijnvormig", "Linear"),

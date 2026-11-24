@@ -2048,6 +2048,12 @@
     "from height": "según la altura",
     "Railing": "Barandilla",
     "Square only": "Solo ortogonal",
-    "Draw only level and upright from the last point; off: any angle": "Dibujar solo en horizontal y vertical desde el último punto; desactivado: cualquier ángulo"
+    "Draw only level and upright from the last point; off: any angle": "Dibujar solo en horizontal y vertical desde el último punto; desactivado: cualquier ángulo",
+    "Connector": "Conexión",
+    "Network": "Red",
+    "fittings": "accesorios",
+    "appliances": "aparatos",
+    "Network length": "Longitud de la red",
+    "Select network": "Seleccionar red"
   }
 }
