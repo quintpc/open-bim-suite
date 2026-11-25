@@ -459,13 +459,14 @@ impl App {
         use crate::document::{Align, Note, NOTE_HEIGHT};
         let spaces = self.spaces();
         let grid = self.modeller.model.grid;
-        // each door: its level, the middle of its foot, the way its width runs, its width
-        let doors: Vec<(Option<String>, DVec2, DVec2, f64)> = self
+        // each door and window: its level, the middle of its foot, the way its width runs, its
+        // width, how thick its leaf or pane is, and (a window) how high it stands and reaches
+        let openings: Vec<(Option<String>, glam::DVec3, DVec2, glam::DVec3, bool)> = self
             .modeller
             .model
             .iter()
             .filter_map(|e| match e.shape_in_project(&grid) {
-                Shape::Point(p) if p.opening == Some(bim_core::OpeningKind::Door) => Some((e.level.clone(), p.at.truncate(), DVec2::from_angle(p.rotation), p.size.x)),
+                Shape::Point(p) if p.opening.is_some() => Some((e.level.clone(), p.at, DVec2::from_angle(p.rotation), p.size, p.opening == Some(bim_core::OpeningKind::Door))),
                 _ => None,
             })
             .collect();
@@ -516,13 +517,32 @@ impl App {
                 notes.push(note(format!("{:.2} m²", s.area), line));
             }
             let mut lines = Vec::new();
-            for (_, at, along, width) in doors.iter().filter(|d| on(&d.0)) {
-                // hinged at the start of its width, its leaf open square to the wall, and the
-                // quarter circle the leaf's end runs to the other jamb
-                let hinge = *at - *along * (*width / 2.0);
-                let leaf = |turn: f64| hinge + DVec2::from_angle(turn).rotate(*along) * *width;
-                lines.push([hinge.to_array(), leaf(std::f64::consts::FRAC_PI_2).to_array()]);
-                const STEPS: usize = 8;
+            let elevation = levels.iter().find(|(path, _)| *path == plan.level).map_or(0.0, |(_, e)| *e);
+            for (_, at, along, size, door) in openings.iter().filter(|d| on(&d.0)) {
+                // between its jambs; one too small for a frame is a block, cut as it stands
+                let frame = bim_core::element::FRAME_WIDTH;
+                if size.x <= 3.0 * frame || size.z <= 3.0 * frame {
+                    continue;
+                }
+                let (middle, width) = (at.truncate(), size.x - 2.0 * frame);
+                if !*door {
+                    // a window the plan cuts: its pane, a line from jamb to jamb
+                    let (sill, head) = (at.z - elevation, at.z + size.z - elevation);
+                    if sill < plan.cut && head > plan.cut {
+                        lines.push([(middle - *along * (width / 2.0)).to_array(), (middle + *along * (width / 2.0)).to_array()]);
+                    }
+                    continue;
+                }
+                // a door: hinged at the jamb at the start of its width, its leaf open square to
+                // the wall (as thick as it is), and the quarter circle its end runs to the other jamb
+                let hinge = middle - *along * (width / 2.0);
+                let leaf = |turn: f64| hinge + DVec2::from_angle(turn).rotate(*along) * width;
+                let thick = *along * size.y.clamp(0.02, 0.06);
+                let tip = leaf(std::f64::consts::FRAC_PI_2);
+                lines.push([hinge.to_array(), tip.to_array()]);
+                lines.push([tip.to_array(), (tip + thick).to_array()]);
+                lines.push([(tip + thick).to_array(), (hinge + thick).to_array()]);
+                const STEPS: usize = 12;
                 for k in 0..STEPS {
                     let turn = |k: usize| std::f64::consts::FRAC_PI_2 * k as f64 / STEPS as f64;
                     lines.push([leaf(turn(k)).to_array(), leaf(turn(k + 1)).to_array()]);
@@ -743,13 +763,17 @@ mod tests {
         let tags: Vec<String> = app.document.view_tags(&plan).iter().map(|n| n.text.clone()).collect();
         assert_eq!(tags, ["Space 1", "25.84 m²"]);
         let swing = app.document.view_symbols(&plan);
-        assert_eq!(swing.len(), 9, "the leaf and the quarter circle in eight chords");
-        // the leaf stands square to the wall at the hinge, as long as the door is wide
+        assert_eq!(swing.len(), 15, "the leaf open (three sides of it) and the quarter circle in twelve chords");
+        // the leaf stands square to the wall at the hinge on its jamb, as long as the door is
+        // wide between its jambs
         let (a, b) = (DVec2::from_array(swing[0][0]), DVec2::from_array(swing[0][1]));
-        assert!((a - DVec2::new(2.55, 0.0)).length() < 1e-9 && (b - DVec2::new(2.55, 0.9)).length() < 1e-9, "{a} {b}");
+        assert!((a - DVec2::new(2.61, 0.0)).length() < 1e-9 && (b - DVec2::new(2.61, 0.78)).length() < 1e-9, "{a} {b}");
+        // and the plan does not cut the leaf where it stands closed
+        let scene = app.model.clone().unwrap();
+        assert_eq!(scene.project.symbolised.len(), 1, "the door's leaf");
         // drawn as on a sheet, the plan's drawing holds both
         let drawing = crate::drawing2d::view_drawing(&app.document, &plan, &crate::drawing::Cut::default(), &crate::drawing2d::Rules::default()).unwrap();
-        assert!(drawing.texts.iter().any(|t| t.text == "Space 1") && drawing.lines.len() >= 9);
+        assert!(drawing.texts.iter().any(|t| t.text == "Space 1") && drawing.lines.len() >= 15);
         // a wall gone, no space, and the plan says none
         app.select_modelled(bim_core::ElementId(2));
         let _ = app.update(crate::app::Message::DeletePicked);

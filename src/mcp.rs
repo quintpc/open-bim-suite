@@ -271,9 +271,9 @@ pub fn tools() -> Vec<Value> {
                 "type": { "type": "string", "description": "The type to pick: its id or its name" },
                 "language": { "type": "string", "description": "The language of the names: en, nl, de or fr" }
             }), &[], false),
-        tool("tool_option", "The Modeller: the other lists of the strip of the tool that is on: the service of a duct, pipe, cable tray or appliance (supply air, heating supply, cold water, ...; '-' for none) and the kind of an appliance (radiator, boiler, pump, ...). Without a value it gives the lists with what they offer and what is picked; with a list and a value (a name in English or as shown, any case) it picks that, as choosing it in the list does. ui_press cannot open a list, so this is how one is chosen.",
+        tool("tool_option", "The Modeller: the other lists of the strip of the tool that is on: the material of a wall, a floor or a roof (its type is then the one of that material alone, as thick as the Thickness field says, and its cut is hatched as the material; '-' for none), the service of a duct, pipe, cable tray or appliance (supply air, heating supply, cold water, ...; '-' for none) and the kind of an appliance (radiator, boiler, pump, ...). Without a value it gives the lists with what they offer and what is picked; with a list and a value (a name in English or as shown, any case) it picks that, as choosing it in the list does. ui_press cannot open a list, so this is how one is chosen.",
             json!({
-                "list": { "type": "string", "enum": ["service", "kind"], "description": "The list to pick in" },
+                "list": { "type": "string", "enum": ["material", "service", "kind"], "description": "The list to pick in" },
                 "value": { "type": "string", "description": "What to pick: its name" },
                 "language": { "type": "string", "description": "The language of the names shown: en, nl, de or fr" }
             }), &[], false),

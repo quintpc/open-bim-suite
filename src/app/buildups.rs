@@ -91,6 +91,16 @@ fn fresh_id(library: &Library, role: Role) -> String {
     (1..).map(|n| format!("own.{}.{n}", role.name().to_lowercase())).find(|id| library.buildup(id).is_none()).unwrap_or_default()
 }
 
+/// The build-up of `role` of one layer of `material`, `thickness` thick: the library's own
+/// where it has one, else one to add to it, under an id that says what it is
+/// ("own.wall.sand-lime-300"). What a material and a thickness picked in a tool's strip make.
+pub fn one_layer(library: &Library, role: Role, material: &str, thickness: f64) -> BuildUp {
+    let mm = format!("{:.1}", thickness * 1000.0);
+    let id = format!("own.{}.{material}-{}", role.name().to_lowercase(), mm.trim_end_matches('0').trim_end_matches('.'));
+    let wanted = BuildUp::new(&id, role, vec![Layer::new(material, thickness)]);
+    library.matching(&wanted).cloned().unwrap_or(wanted)
+}
+
 /// A build-up more of `role`: one layer of the library's first material, 100 mm; its id.
 pub fn add(library: &mut Library, role: Role) -> Result<String, LibraryError> {
     let material = library.materials.first().map(|m| m.key.clone()).ok_or(LibraryError::NoLayers)?;

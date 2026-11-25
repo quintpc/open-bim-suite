@@ -152,6 +152,9 @@ pub enum PlaceField {
 pub enum PlaceMessage {
     /// The type picked (`None`: generic).
     Kind(Option<String>),
+    /// The material picked for a wall, a floor or a roof (`None`: of no material): its type is
+    /// the one of that material alone, as thick as the strip says.
+    Material(Option<String>),
     Field(PlaceField, String),
     /// Enter: the fields show the values in use.
     Done,
@@ -200,7 +203,7 @@ impl Placement {
         self.set(tool, settings);
     }
 
-    fn set(&mut self, tool: ModelTool, settings: Settings) {
+    pub(super) fn set(&mut self, tool: ModelTool, settings: Settings) {
         self.settings.insert(tool, settings);
     }
 
@@ -419,6 +422,32 @@ fn shown(s: &Settings, field: PlaceField) -> String {
 /// below 0, a height left empty (up to the next level) where the tool allows it. A beam's height
 /// is where its top lies to its level, so it may be 0 or below it (a foundation beam); so may a
 /// service run's centre (a pipe under the floor).
+/// The library's role of what the Slab tool makes as `role`.
+pub(super) fn slab_role(role: bim_core::SlabRole) -> bim_library::Role {
+    match role {
+        bim_core::SlabRole::Floor => bim_library::Role::Floor,
+        bim_core::SlabRole::Roof => bim_library::Role::Roof,
+        bim_core::SlabRole::Ceiling => bim_library::Role::Ceiling,
+    }
+}
+
+/// The role of the build-ups `tool` draws with settings `s`.
+fn buildup_role(tool: ModelTool, s: &Settings) -> bim_library::Role {
+    if tool == ModelTool::Wall { bim_library::Role::Wall } else { slab_role(s.role) }
+}
+
+/// The material and the thickness of the type of `s` when `tool` draws walls, floors or roofs
+/// and that type is of one layer: such a type's thickness can be typed.
+fn one_layer_of(library: &bim_library::Library, tool: ModelTool, s: &Settings) -> Option<(String, f64)> {
+    if !matches!(tool, ModelTool::Wall | ModelTool::Slab) {
+        return None;
+    }
+    match &library.buildup(s.kind.as_deref()?)?.layers[..] {
+        [layer] => Some((layer.material.clone(), layer.thickness)),
+        _ => None,
+    }
+}
+
 fn with_typed(tool: ModelTool, s: &Settings, field: PlaceField, typed: &str) -> Option<Settings> {
     let mut s = s.clone();
     let typed = typed.trim();
@@ -470,6 +499,19 @@ impl App {
                     }
                 }
                 s.kind = kind;
+                // a type of one layer: the thickness shown is its own, and typed over it another
+                if let Some((_, thickness)) = one_layer_of(&self.library, tool, &s) {
+                    s.width = thickness;
+                }
+            }
+            PlaceMessage::Material(material) => {
+                s.kind = material.and_then(|key| {
+                    let own = super::buildups::one_layer(&self.library, buildup_role(tool, &s), &key, s.width);
+                    if self.library.buildup(&own.id).is_none() {
+                        self.library.add_buildup(own.clone()).ok()?;
+                    }
+                    Some(own.id)
+                });
             }
             PlaceMessage::Location(location) => s.location = location,
             PlaceMessage::Grade(grade) => s.grade = grade,
@@ -498,6 +540,15 @@ impl App {
             }
             PlaceMessage::Done => {
                 placement.typing = None;
+                // a thickness typed over a type of one layer: the type of that thickness
+                if let Some((material, thickness)) = one_layer_of(&self.library, tool, &s).filter(|(_, t)| (t - s.width).abs() > 1e-6) {
+                    let _ = thickness;
+                    let own = super::buildups::one_layer(&self.library, buildup_role(tool, &s), &material, s.width);
+                    if self.library.buildup(&own.id).is_some() || self.library.add_buildup(own.clone()).is_ok() {
+                        s.kind = Some(own.id);
+                        placement.set(tool, s);
+                    }
+                }
                 return;
             }
             PlaceMessage::Field(field, typed) => {
@@ -585,17 +636,25 @@ impl App {
     /// The other lists of the active tool's strip, for the remote control, which cannot open a
     /// list: each with its name (`service`, `kind`), what it offers (the names in English and in
     /// language `l`) and the one picked (in English). Empty while the tool has none.
-    pub(crate) fn tool_options(&self, l: Language) -> Vec<(&'static str, Vec<(&'static str, &'static str)>, &'static str)> {
+    pub(crate) fn tool_options(&self, l: Language) -> Vec<(&'static str, Vec<(String, String)>, String)> {
         let Some((tool, s)) = self.tool_settings() else { return Vec::new() };
         let mut lists = Vec::new();
         if tool == ModelTool::Appliance {
-            let kinds = bim_core::PointRole::APPLIANCES.into_iter().map(|r| (appliance_label(r, Language::English), appliance_label(r, l))).collect();
-            lists.push(("kind", kinds, appliance_label(s.appliance, Language::English)));
+            let kinds = bim_core::PointRole::APPLIANCES.into_iter().map(|r| (appliance_label(r, Language::English).to_string(), appliance_label(r, l).to_string())).collect();
+            lists.push(("kind", kinds, appliance_label(s.appliance, Language::English).to_string()));
         }
         if tool.service().is_some() || tool == ModelTool::Appliance {
             let fits = |v: &bim_core::Service| tool.service().is_none_or(|role| v.role() == role);
-            let services = std::iter::once(("-", "-")).chain(bim_core::Service::ALL.into_iter().filter(fits).map(|v| (v.name(), service_label(v, l)))).collect();
-            lists.push(("service", services, s.service.map_or("-", |v| v.name())));
+            let services = std::iter::once(("-".to_string(), "-".to_string())).chain(bim_core::Service::ALL.into_iter().filter(fits).map(|v| (v.name().to_string(), service_label(v, l).to_string()))).collect();
+            lists.push(("service", services, s.service.map_or("-", |v| v.name()).to_string()));
+        }
+        if matches!(tool, ModelTool::Wall | ModelTool::Slab) {
+            // the material of a wall, a floor or a roof of one layer
+            let lang = super::library::lang(l);
+            let name = |m: &bim_library::Material, lang| m.name(lang).to_string();
+            let materials = std::iter::once(("-".to_string(), "-".to_string())).chain(self.library.materials.iter().map(|m| (name(m, bim_library::Lang::En), name(m, lang)))).collect();
+            let picked = one_layer_of(&self.library, tool, &s).and_then(|(key, _)| self.library.material(&key).map(|m| name(m, bim_library::Lang::En)));
+            lists.push(("material", materials, picked.unwrap_or_else(|| "-".to_string())));
         }
         lists
     }
@@ -609,6 +668,7 @@ impl App {
             return false;
         }
         let message = match list {
+            "material" => Some(PlaceMessage::Material(self.library.materials.iter().find(|m| is(m.name(bim_library::Lang::En), m.name(super::library::lang(l)))).map(|m| m.key.clone()))),
             "kind" => bim_core::PointRole::APPLIANCES.into_iter().find(|r| is(appliance_label(*r, Language::English), appliance_label(*r, l))).map(PlaceMessage::Appliance),
             _ => Some(PlaceMessage::Service(bim_core::Service::ALL.into_iter().find(|v| is(v.name(), service_label(*v, l))))),
         };
@@ -640,6 +700,17 @@ impl App {
             let pick = if tool == ModelTool::System { pick } else { pick.width(150) };
             bar = bar.push(pair(label(l.text("Type", "Type")), pick));
         }
+        let one_layer = one_layer_of(&self.library, tool, &s);
+        if matches!(tool, ModelTool::Wall | ModelTool::Slab) {
+            // what it is made of: the type of that material alone, as thick as typed below, so
+            // its cut is hatched as the material
+            let lang = super::library::lang(l);
+            let none = Choice { id: None, name: "-".to_string() };
+            let choices: Vec<Choice> = std::iter::once(none).chain(self.library.materials.iter().map(|m| Choice { id: Some(m.key.clone()), name: m.name(lang).to_string() })).collect();
+            let picked = choices.iter().find(|c| c.id == one_layer.as_ref().map(|(material, _)| material.clone())).cloned();
+            let pick = pick_list(choices, picked, |c: Choice| Message::Place(PlaceMessage::Material(c.id))).text_size(12).padding([2, 6]).width(150);
+            bar = bar.push(pair(label(l.text("Materiaal", "Material")), pick));
+        }
         let typing = self.modeller.placement.typing.clone();
         let mut listed = fields(tool, l);
         // a roof: the angle its eaves rise at (0: flat)
@@ -648,7 +719,7 @@ impl App {
         }
         for (field, name) in listed {
             // a typed element's thickness is its type's
-            let fixed = field == PlaceField::Width && s.kind.is_some() && matches!(tool, ModelTool::Wall | ModelTool::Slab | ModelTool::Column | ModelTool::Beam);
+            let fixed = field == PlaceField::Width && s.kind.is_some() && matches!(tool, ModelTool::Wall | ModelTool::Slab | ModelTool::Column | ModelTool::Beam) && one_layer.is_none();
             let fixed = fixed || (field == PlaceField::Depth && s.kind.is_some() && matches!(tool, ModelTool::Column | ModelTool::Beam));
             // a stair's steps not typed are counted from its height: the field is empty and says so
             let counted = tool == ModelTool::Stair && field == PlaceField::Sill && s.sill < 2.0;
@@ -844,6 +915,39 @@ mod tests {
         click(&mut app, 4.0, 0.0);
         let w = wall(&app, 1);
         assert_eq!(w.build_up.map(|b| b.id), Some(id));
+    }
+
+    #[test]
+    fn a_material_and_a_thickness_typed_make_a_wall_of_that_material_hatched_as_it() {
+        let mut app = modelling();
+        app.set_model_tool(Some((ModelTool::Wall, "Wall")));
+        // the strip lists the library's materials; one picked is the type of that material alone
+        let lists = app.tool_options(Language::Dutch);
+        let (_, materials, picked) = lists.iter().find(|(name, ..)| *name == "material").expect("the material list");
+        assert!(picked == "-" && materials.iter().any(|(en, _)| en == "sand-lime brick"), "{materials:?}");
+        place(&mut app, PlaceMessage::Field(PlaceField::Width, "0.3".into()));
+        assert!(app.pick_tool_option("material", "sand-lime brick", Language::English));
+        let before = app.library.buildups.len();
+        click(&mut app, 0.0, 0.0);
+        click(&mut app, 4.0, 0.0);
+        let w = wall(&app, 1);
+        let b = w.build_up.clone().expect("a build-up");
+        assert!((w.total_thickness() - 0.3).abs() < 1e-12 && b.layers.len() == 1 && b.layers[0].material == "sand-lime", "{b:?}");
+        assert_eq!(app.library.name(&b.id, bim_library::Lang::Nl).as_deref(), Some("Kalkzandsteen 300"), "a type of the library, named as its others");
+        let props = app.model.as_ref().unwrap().element_props(1);
+        assert!(props.iter().any(|(k, v)| k == "Material" && v == "sand-lime brick"), "its cut takes the hatch of its material: {props:?}");
+        // another thickness typed over it: the type of that thickness, the library's own where it has it
+        let _ = app.update(Message::ModelTool(None));
+        app.set_model_tool(Some((ModelTool::Wall, "Wall")));
+        place(&mut app, PlaceMessage::Field(PlaceField::Width, "0.214".into()));
+        click(&mut app, 0.0, 5.0);
+        click(&mut app, 4.0, 5.0);
+        let second = app.modeller.model.iter().filter_map(|e| match &e.shape { Shape::Planar(p) => Some(p.clone()), _ => None }).last().unwrap();
+        assert_eq!(second.build_up.as_ref().map(|b| b.id.as_str()), Some("wall.sand-lime-214"));
+        assert_eq!(app.library.buildups.len(), before, "no type more than the one of 300 made before");
+        // a type of several layers keeps its thickness, and '-' is a wall of no material again
+        assert!(app.pick_tool_option("material", "-", Language::English));
+        assert_eq!(app.tool_settings().unwrap().1.kind, None);
     }
 
     #[test]

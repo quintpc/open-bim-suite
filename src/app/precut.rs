@@ -46,7 +46,10 @@ impl CutJob {
         let index = index.clone().filter(|_| units.iter().chain(&halftone).any(|u| *u));
         // reinforcing bars are left out as solids: a section draws signs for those it cuts, and a
         // reinforcement drawing has its own
-        let hidden = |l: usize, v: u32| model.project.bar_at(l, v) || index.as_ref().is_some_and(|ix| units.get(ix.unit(l, v)).copied().unwrap_or(false));
+        // and a floor plan draws a door's leaf open and a window's pane as a line (see
+        // `tag_plans`): it does not cut them where they stand closed
+        let plan = matches!(kind, CutKind::Plan { .. });
+        let hidden = |l: usize, v: u32| model.project.bar_at(l, v) || (plan && model.project.symbol_at(l, v)) || index.as_ref().is_some_and(|ix| units.get(ix.unit(l, v)).copied().unwrap_or(false));
         let faint = |l: usize, v: u32| index.as_ref().is_some_and(|ix| halftone.get(ix.unit(l, v)).copied().unwrap_or(false));
         // the pieces joined elements of one material make: the seams within one are not drawn
         let pieces = crate::hatching::pieces(&model, bim_library::DrawingStandard::Nen47);

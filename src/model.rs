@@ -301,6 +301,10 @@ pub struct ProjectData {
     /// the first vertex and the vertex count of each run of them; sorted. They show in 3D and
     /// are left out of the cut drawings, where a reinforcement drawing has its own signs for them.
     pub bars: Vec<(usize, u32, u32)>,
+    /// What a floor plan draws by a symbol and so does not cut: the leaf of each modelled door
+    /// (drawn open, with its swing) and the pane of each window (a line); the layer, the first
+    /// vertex and the vertex count of each, sorted.
+    pub symbolised: Vec<(usize, u32, u32)>,
     /// What the parts are made of: each material with how a cut through it is hatched.
     pub part_materials: Vec<crate::hatching::PartMaterial>,
     /// The earth under the terrain a section cuts (Revit, the settings of the site): the height
@@ -376,6 +380,13 @@ impl ProjectData {
     pub fn bar_at(&self, layer: usize, v: u32) -> bool {
         let Some(k) = self.bars.partition_point(|b| (b.0, b.1) <= (layer, v)).checked_sub(1) else { return false };
         let (of, first, count) = self.bars[k];
+        of == layer && v < first + count
+    }
+
+    /// Whether vertex `v` of `layer` is of what a floor plan draws by a symbol (see `symbolised`).
+    pub fn symbol_at(&self, layer: usize, v: u32) -> bool {
+        let Some(k) = self.symbolised.partition_point(|b| (b.0, b.1) <= (layer, v)).checked_sub(1) else { return false };
+        let (of, first, count) = self.symbolised[k];
         of == layer && v < first + count
     }
 
@@ -1042,6 +1053,10 @@ impl Model {
                     ALIGN_LIMIT / 1000.0
                 )));
             }
+            // the reinforcing bars and what a plan draws by a symbol: with the layers they are of
+            let first_layer = layers.len();
+            project.bars.extend(model.project.bars.iter().map(|&(l, first, count)| (first_layer + l, first, count)));
+            project.symbolised.extend(model.project.symbolised.iter().map(|&(l, first, count)| (first_layer + l, first, count)));
             for layer in &model.layers {
                 let mut layer = layer.clone();
                 layer.name = format!("{source} / {}", layer.name);

@@ -17,6 +17,7 @@
 
 pub mod boolean;
 pub mod datum;
+mod delta;
 pub mod element;
 pub mod join;
 mod joins;

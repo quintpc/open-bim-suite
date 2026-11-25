@@ -546,7 +546,7 @@ impl App {
                 let language = a.get("language").and_then(|v| v.as_str()).and_then(openaec_ui::Language::from_code).unwrap_or(openaec_ui::Language::English);
                 let lists = self.tool_options(language);
                 if lists.is_empty() {
-                    return Err("the tool that is on has no such list: press a tool of the MEP tab first (Duct, Pipe, Cable tray, Appliance)".into());
+                    return Err("the tool that is on has no such list: press Wall or Slab (material), or a tool of the MEP tab (Duct, Pipe, Cable tray, Appliance) first".into());
                 }
                 if let (Some(list), Some(value)) = (a.get("list").and_then(|v| v.as_str()), a.get("value").and_then(|v| v.as_str())) {
                     if !self.pick_tool_option(list, value, language) {
