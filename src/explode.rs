@@ -202,9 +202,16 @@ impl ExplodeIndex {
         let mut levels: HashMap<String, Vec<u32>> = HashMap::new();
         for (u, id) in elements.iter().enumerate() {
             let Some(json) = id.and_then(|id| model.props.get(&id)).filter(|j| j.contains("\"level\"")) else { continue };
-            let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json) else { continue };
-            if let Some(level) = map.get("level").and_then(|v| v.as_str()).filter(|l| !l.is_empty()) {
-                levels.entry(level.to_string()).or_default().push(u as u32);
+            // its level alone is read: the other properties (a modelled element's whole
+            // definition among them) are passed over, not built
+            #[derive(serde::Deserialize)]
+            struct OfLevel<'a> {
+                #[serde(borrow, default)]
+                level: Option<std::borrow::Cow<'a, str>>,
+            }
+            let Ok(of) = serde_json::from_str::<OfLevel>(json) else { continue };
+            if let Some(level) = of.level.filter(|l| !l.is_empty()) {
+                levels.entry(level.into_owned()).or_default().push(u as u32);
             }
         }
         let elevation: HashMap<&str, f32> = model.project.levels.iter().map(|(n, z)| (n.as_str(), *z)).collect();

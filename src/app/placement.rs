@@ -99,6 +99,8 @@ pub struct Settings {
     pub appliance: bim_core::PointRole,
     /// The Stair tool gives its stairs a railing.
     pub railing: bool,
+    /// The Door tool hangs its doors the other way: hinged at the end of their width.
+    pub mirrored: bool,
 }
 
 impl Settings {
@@ -110,7 +112,7 @@ impl Settings {
 
     /// What a tool places when nothing was typed.
     pub fn default_for(tool: ModelTool) -> Self {
-        let plain = |width: f64, depth: f64, height: Option<f64>| Settings { kind: None, width, depth, height, offset: 0.0, sill: 0.0, location: LocationLine::Centre, grade: None, role: bim_core::SlabRole::Floor, service: None, appliance: bim_core::PointRole::Radiator, railing: true };
+        let plain = |width: f64, depth: f64, height: Option<f64>| Settings { kind: None, width, depth, height, offset: 0.0, sill: 0.0, location: LocationLine::Centre, grade: None, role: bim_core::SlabRole::Floor, service: None, appliance: bim_core::PointRole::Radiator, railing: true, mirrored: false };
         use super::element_props::{DOOR, WINDOW};
         use super::modeller::{BEAM, CABLE_TRAY, COLUMN, DUCT, OBJECT, PIPE, ROUND_DUCT, SERVICE_HEIGHT, SLAB_THICKNESS, WALL_THICKNESS};
         match tool {
@@ -167,6 +169,8 @@ pub enum PlaceMessage {
     Service(Option<bim_core::Service>),
     /// What the Appliance tool places; its fields take that one's usual size.
     Appliance(bim_core::PointRole),
+    /// The Door tool hangs its doors the other way, or as usual.
+    Mirrored(bool),
     /// The Stair tool gives its stairs a railing, or none.
     Railing(bool),
     Chain(bool),
@@ -518,6 +522,7 @@ impl App {
             PlaceMessage::Service(service) => s.service = service,
             PlaceMessage::Appliance(role) => s = s.of_appliance(role),
             PlaceMessage::Railing(on) => s.railing = on,
+            PlaceMessage::Mirrored(on) => s.mirrored = on,
             PlaceMessage::Role(role) => {
                 if s.role != role {
                     s.role = role;
@@ -781,6 +786,12 @@ impl App {
             let railed = s.railing;
             let railing = button(text(l.text("Leuning", "Railing")).size(12)).padding([3, 10]).style(move |_, st| p.ribbon_button(railed, st)).on_press(Message::Place(PlaceMessage::Railing(!railed)));
             bar = bar.push(sketch).push(railing);
+        }
+        if tool == ModelTool::Door {
+            // which jamb it hangs on: the plan draws its leaf and swing from there
+            let on = s.mirrored;
+            let mirror = button(text(l.text("Andersom draaiend", "Hung the other way")).size(12)).padding([3, 10]).style(move |_, st| p.ribbon_button(on, st)).on_press(Message::Place(PlaceMessage::Mirrored(!on)));
+            bar = bar.push(mirror);
         }
         if tool == ModelTool::Wall {
             let on = self.modeller.placement.rectangle;

@@ -900,7 +900,7 @@ mod tests {
     #[test]
     fn every_base_element_evaluates() {
         let mut m = Model::new(TileGrid::default());
-        let point = add(&mut m, Shape::Point(PointDef { at: DVec3::new(1.0, 1.0, 0.0), rotation: 0.5, size: DVec3::new(0.6, 0.6, 0.9), opening: None, role: Default::default() }));
+        let point = add(&mut m, Shape::Point(PointDef { at: DVec3::new(1.0, 1.0, 0.0), rotation: 0.5, size: DVec3::new(0.6, 0.6, 0.9), opening: None, mirrored: false, role: Default::default() }));
         let system = add(
             &mut m,
             Shape::System(SystemDef { start: DVec2::new(0.0, 5.0), end: DVec2::new(6.0, 5.0), base: 0.0, height: 3.0, spacing: DVec2::new(1.2, 1.5), member: DVec2::new(0.05, 0.15), panel: 0.02, system_type: None, openings: Vec::new(), breaks: Vec::new(), outline: Vec::new(), grid: None, division: None }),
@@ -939,7 +939,7 @@ mod tests {
         let mut m = Model::new(TileGrid::default());
         let wall = add(&mut m, wall_along_x());
         let far = add(&mut m, beam(DVec3::new(3.0, 5.0, 2.5), DVec3::new(3.0, 9.0, 2.5)));
-        let block = add(&mut m, Shape::Point(PointDef { at: DVec3::new(3.0, 0.0, -1.0), rotation: 0.0, size: DVec3::new(8.0, 2.0, 6.0), opening: None, role: Default::default() }));
+        let block = add(&mut m, Shape::Point(PointDef { at: DVec3::new(3.0, 0.0, -1.0), rotation: 0.0, size: DVec3::new(8.0, 2.0, 6.0), opening: None, mirrored: false, role: Default::default() }));
         let grid = m.grid;
         let try_cut = |m: &mut Model, primary, secondary| m.add(Element::in_project(&grid, "c", None, Shape::Connection(ConnectionDef { kind: ConnectionKind::Cut, primary, secondary })));
         assert_eq!(try_cut(&mut m, far, wall), Err(Refusal::NotTouching));
@@ -1150,7 +1150,7 @@ mod tests {
     fn a_door_cuts_the_wall_it_stands_in_and_moved_to_another_the_first_closes() {
         use crate::element::OpeningKind;
         let wall = |y: f64| Shape::Planar(PlanarDef { form: PlanarForm::Wall { start: DVec2::new(0.0, y), end: DVec2::new(6.0, y), base: 0.0, height: 3.0 }, thickness: 0.2, openings: Vec::new(), build_up: None });
-        let door = |x: f64, y: f64, rotation: f64| Shape::Point(PointDef { at: DVec3::new(x, y, 0.0), rotation, size: DVec3::new(0.9, 0.04, 2.1), opening: Some(OpeningKind::Door), role: Default::default() });
+        let door = |x: f64, y: f64, rotation: f64| Shape::Point(PointDef { at: DVec3::new(x, y, 0.0), rotation, size: DVec3::new(0.9, 0.04, 2.1), opening: Some(OpeningKind::Door), mirrored: false, role: Default::default() });
         let mut m = Model::new(TileGrid::default());
         let (south, north) = (add(&mut m, wall(0.0)), add(&mut m, wall(4.0)));
         let whole = 6.0 * 0.2 * 3.0;
@@ -1161,7 +1161,7 @@ mod tests {
         // the door is a frame of three members and a leaf; a window a frame of four and a pane of glass
         let parts = m.evaluate(id).unwrap();
         assert_eq!((parts.len(), parts.iter().filter(|p| p.material.is_some()).count()), (4, 0));
-        let window = add(&mut m, Shape::Point(PointDef { at: DVec3::new(4.5, 0.0, 0.9), rotation: 0.0, size: DVec3::new(1.2, 0.04, 1.2), opening: Some(OpeningKind::Window), role: Default::default() }));
+        let window = add(&mut m, Shape::Point(PointDef { at: DVec3::new(4.5, 0.0, 0.9), rotation: 0.0, size: DVec3::new(1.2, 0.04, 1.2), opening: Some(OpeningKind::Window), mirrored: false, role: Default::default() }));
         let parts = m.evaluate(window).unwrap();
         assert_eq!(parts.len(), 5);
         let glass: Vec<_> = parts.iter().filter(|p| p.material.as_deref() == Some("glass")).collect();
@@ -1323,7 +1323,7 @@ mod tests {
     fn an_appliance_has_connectors_and_a_run_ending_on_one_is_of_its_network() {
         use crate::element::{PointRole, Service};
         let mut m = Model::new(TileGrid::default());
-        let boiler = add(&mut m, Shape::Point(PointDef { at: DVec3::new(0.0, 0.0, 1.2), rotation: 0.0, size: DVec3::new(0.5, 0.3, 0.7), opening: None, role: PointRole::Boiler }));
+        let boiler = add(&mut m, Shape::Point(PointDef { at: DVec3::new(0.0, 0.0, 1.2), rotation: 0.0, size: DVec3::new(0.5, 0.3, 0.7), opening: None, mirrored: false, role: PointRole::Boiler }));
         let found = m.connectors(boiler);
         assert_eq!(found.len(), 6, "five pipes below and the flue on top");
         assert!(found.iter().all(|(_, run)| run.is_none()));
@@ -1353,7 +1353,7 @@ mod tests {
         assert_eq!(m.network(feed), network);
         assert_eq!(m.network(apart), vec![apart]);
         // turned a quarter, its connectors turn with it
-        let turned = PointDef { at: DVec3::ZERO, rotation: std::f64::consts::FRAC_PI_2, size: DVec3::new(1.0, 0.1, 0.6), opening: None, role: PointRole::Radiator };
+        let turned = PointDef { at: DVec3::ZERO, rotation: std::f64::consts::FRAC_PI_2, size: DVec3::new(1.0, 0.1, 0.6), opening: None, mirrored: false, role: PointRole::Radiator };
         let c = turned.connectors();
         assert!((c[0].at - DVec3::new(0.0, -0.5, 0.06)).length() < 1e-9 && (c[0].out - DVec3::new(0.0, -1.0, 0.0)).length() < 1e-9);
     }

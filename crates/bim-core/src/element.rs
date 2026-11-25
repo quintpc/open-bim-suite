@@ -60,6 +60,11 @@ pub struct PointDef {
     pub size: DVec3,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opening: Option<OpeningKind>,
+    /// A door hung the other way: hinged at the end of its width and not at its start. It opens
+    /// to the left of the way its width runs either way, so with its rotation a door has each of
+    /// its four ways of opening.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mirrored: bool,
     /// What it is: an object, or a terminal or an appliance of the installations.
     #[serde(default, skip_serializing_if = "PointRole::is_object")]
     pub role: PointRole,
@@ -1487,7 +1492,7 @@ pub fn opening_solids(p: &PointDef) -> Result<Vec<(Solid, bool)>, Refusal> {
     let (sin, cos) = p.rotation.sin_cos();
     let along = DVec3::new(cos, sin, 0.0);
     // a block: its middle along the width, its foot above the sill, and its sizes
-    let block = |x: f64, z: f64, size: DVec3| point_solid(&PointDef { at: p.at + along * x + DVec3::Z * z, rotation: p.rotation, size, opening: None, role: Default::default() });
+    let block = |x: f64, z: f64, size: DVec3| point_solid(&PointDef { at: p.at + along * x + DVec3::Z * z, rotation: p.rotation, size, opening: None, mirrored: false, role: Default::default() });
     let side = w / 2.0 - f / 2.0;
     let mut solids = Vec::new();
     match kind {
@@ -2034,7 +2039,7 @@ mod tests {
     #[test]
     fn an_element_lives_in_the_tile_of_its_placement() {
         let grid = TileGrid::default();
-        let shape = Shape::Point(PointDef { at: DVec3::new(1500.25, -20.5, 1.0), rotation: 0.0, size: DVec3::ONE, opening: None, role: Default::default() });
+        let shape = Shape::Point(PointDef { at: DVec3::new(1500.25, -20.5, 1.0), rotation: 0.0, size: DVec3::ONE, opening: None, mirrored: false, role: Default::default() });
         let mut e = Element::in_project(&grid, "Box", None, shape.clone());
         assert_eq!(e.tile, TileKey { x: 1, y: -1 });
         assert_eq!(e.shape_in_project(&grid), shape);

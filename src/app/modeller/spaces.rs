@@ -461,12 +461,12 @@ impl App {
         let grid = self.modeller.model.grid;
         // each door and window: its level, the middle of its foot, the way its width runs, its
         // width, how thick its leaf or pane is, and (a window) how high it stands and reaches
-        let openings: Vec<(Option<String>, glam::DVec3, DVec2, glam::DVec3, bool)> = self
+        let openings: Vec<(Option<String>, glam::DVec3, DVec2, glam::DVec3, bool, bool)> = self
             .modeller
             .model
             .iter()
             .filter_map(|e| match e.shape_in_project(&grid) {
-                Shape::Point(p) if p.opening.is_some() => Some((e.level.clone(), p.at, DVec2::from_angle(p.rotation), p.size, p.opening == Some(bim_core::OpeningKind::Door))),
+                Shape::Point(p) if p.opening.is_some() => Some((e.level.clone(), p.at, DVec2::from_angle(p.rotation), p.size, p.opening == Some(bim_core::OpeningKind::Door), p.mirrored)),
                 _ => None,
             })
             .collect();
@@ -518,7 +518,7 @@ impl App {
             }
             let mut lines = Vec::new();
             let elevation = levels.iter().find(|(path, _)| *path == plan.level).map_or(0.0, |(_, e)| *e);
-            for (_, at, along, size, door) in openings.iter().filter(|d| on(&d.0)) {
+            for (_, at, along, size, door, mirrored) in openings.iter().filter(|d| on(&d.0)) {
                 // between its jambs; one too small for a frame is a block, cut as it stands
                 let frame = bim_core::element::FRAME_WIDTH;
                 if size.x <= 3.0 * frame || size.z <= 3.0 * frame {
@@ -533,11 +533,13 @@ impl App {
                     }
                     continue;
                 }
-                // a door: hinged at the jamb at the start of its width, its leaf open square to
-                // the wall (as thick as it is), and the quarter circle its end runs to the other jamb
-                let hinge = middle - *along * (width / 2.0);
-                let leaf = |turn: f64| hinge + DVec2::from_angle(turn).rotate(*along) * width;
-                let thick = *along * size.y.clamp(0.02, 0.06);
+                // a door: hinged at the jamb at the start of its width (at its end when hung the
+                // other way), its leaf open square to the wall on the left of the way its width
+                // runs (as thick as it is), and the quarter circle its end runs to the other jamb
+                let hand = if *mirrored { -1.0 } else { 1.0 };
+                let hinge = middle - *along * (hand * width / 2.0);
+                let leaf = |turn: f64| hinge + DVec2::from_angle(hand * turn).rotate(*along * hand) * width;
+                let thick = *along * (hand * size.y.clamp(0.02, 0.06));
                 let tip = leaf(std::f64::consts::FRAC_PI_2);
                 lines.push([hinge.to_array(), tip.to_array()]);
                 lines.push([tip.to_array(), (tip + thick).to_array()]);
@@ -640,7 +642,7 @@ mod tests {
         assert!(app.spaces().is_empty());
         app.set_model_tool(Some((ModelTool::Door, "Door")));
         app.place_message(crate::app::placement::PlaceMessage::Field(crate::app::placement::PlaceField::Width, "1.0".into()));
-        app.place_opening_at(ModelTool::Door, 2.5, 0.0, 0.0);
+        app.place_opening_at(ModelTool::Door, 2.5, 0.0, 0.0, None);
         assert_eq!(app.spaces().len(), 1, "{:?}", app.modeller.refusal);
     }
 
@@ -768,6 +770,17 @@ mod tests {
         // wide between its jambs
         let (a, b) = (DVec2::from_array(swing[0][0]), DVec2::from_array(swing[0][1]));
         assert!((a - DVec2::new(2.61, 0.0)).length() < 1e-9 && (b - DVec2::new(2.61, 0.78)).length() < 1e-9, "{a} {b}");
+        // a door hung the other way is hinged on its other jamb, and opens to the same side
+        app.set_model_tool(Some((ModelTool::Door, "Door")));
+        app.place_opening_at(ModelTool::Door, 7.0, 4.0, 0.0, Some(true));
+        app.set_model_tool(None);
+        let other = app.document.view_symbols(&plan)[15..].to_vec();
+        let (a, b) = (DVec2::from_array(other[0][0]), DVec2::from_array(other[0][1]));
+        assert!((a - DVec2::new(7.39, 4.0)).length() < 1e-9 && (b - DVec2::new(7.39, 4.78)).length() < 1e-9, "{a} {b}");
+        let swing = app.document.view_symbols(&plan)[..15].to_vec();
+        app.select_modelled(bim_core::ElementId(app.modeller.model.iter().map(|e| e.id.0).max().unwrap()));
+        let _ = app.update(crate::app::Message::DeletePicked);
+        app.sel.set(None);
         // and the plan does not cut the leaf where it stands closed
         let scene = app.model.clone().unwrap();
         assert_eq!(scene.project.symbolised.len(), 1, "the door's leaf");

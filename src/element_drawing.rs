@@ -1012,7 +1012,7 @@ mod tests {
         // are those the model makes with it
         let (mut m, id) = typed(9.0, Vec::new(), "system.timber-frame-140-clad");
         let grid = m.grid;
-        let window = bim_core::PointDef { at: glam::DVec3::new(2.0, 1.0 + 3.6, 0.5 + 0.9), rotation: std::f64::consts::FRAC_PI_2, size: glam::DVec3::new(1.2, 0.04, 1.2), opening: Some(bim_core::OpeningKind::Window), role: Default::default() };
+        let window = bim_core::PointDef { at: glam::DVec3::new(2.0, 1.0 + 3.6, 0.5 + 0.9), rotation: std::f64::consts::FRAC_PI_2, size: glam::DVec3::new(1.2, 0.04, 1.2), opening: Some(bim_core::OpeningKind::Window), mirrored: false, role: Default::default() };
         m.add(Element::in_project(&grid, "Window", None, Shape::Point(window))).unwrap();
         let e = m.get(id).unwrap();
         assert_eq!(m.openings_of(id).len(), 1);

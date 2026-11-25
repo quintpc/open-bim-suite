@@ -748,7 +748,7 @@ impl App {
     }
 
     /// Project a metric work-plane point onto the active viewport, then use the GUI placement path.
-    pub(crate) fn place_model_point(&mut self, x: f64, y: f64, rotation: Option<f64>) -> Result<serde_json::Value, String> {
+    pub(crate) fn place_model_point(&mut self, x: f64, y: f64, rotation: Option<f64>, mirrored: Option<bool>) -> Result<serde_json::Value, String> {
         if !self.annotates || !self.modeller.in_modeller || self.active_doc_tab() != 0 { return Err("Open the Modeller 3D view first".into()) }
         // a sketch that is open takes the point: of a floor's outline, in plan
         if let Some(sketch) = &self.modeller.sketch {
@@ -762,7 +762,7 @@ impl App {
             // middle at the point, and cuts the walls it stands in
             let degrees = rotation.ok_or("A door or a window is clicked on a wall in the viewport (pick), or placed here with rotation: the way its width runs, in degrees from the x axis")?;
             let before = self.modeller.model.iter().map(|e| e.id.0).max().unwrap_or(0);
-            self.place_opening_at(tool, x, y, degrees.to_radians());
+            self.place_opening_at(tool, x, y, degrees.to_radians(), mirrored);
             if let Some(reason) = self.modeller.refusal { return Err(reason.reason().into()) }
             let created: Vec<_> = self.modeller.model.iter().filter(|e| e.id.0 > before).map(|e| e.id.0).collect();
             return Ok(serde_json::json!({"point": [x, y, self.work_plane().0], "snap": null, "created": created}));
@@ -1242,7 +1242,7 @@ impl App {
             self.modeller.model.replace(joint).expect("the demo's end plate");
             self.show_modelled();
         }
-        add(self, "Object", Shape::Point(PointDef { at: DVec3::new(7.0, 3.0, 0.0), rotation: 0.4, size: OBJECT, opening: None, role: Default::default() }));
+        add(self, "Object", Shape::Point(PointDef { at: DVec3::new(7.0, 3.0, 0.0), rotation: 0.4, size: OBJECT, opening: None, mirrored: false, role: Default::default() }));
         // a beam through the side wall, cutting its way
         let through = add(self, "Beam", beam(p(8.5, 3.0), p(13.0, 3.0)));
         add(self, "Cut-out", Shape::Connection(ConnectionDef { kind: ConnectionKind::Cut, primary: through, secondary: side }));
@@ -1297,9 +1297,9 @@ pub(super) fn tool_shape(tool: ModelTool, a: DVec3, b: DVec3, z: f64, storey: f6
     };
     match tool {
         // an opening tool places none of its own (see `openings`): an object stands for it
-        ModelTool::Appliance => Shape::Point(PointDef { at: a + DVec3::Z * s.offset, rotation: 0.0, size: DVec3::new(s.width, s.depth.max(0.01), s.height.unwrap_or(OBJECT.z)), opening: None, role: s.appliance }),
+        ModelTool::Appliance => Shape::Point(PointDef { at: a + DVec3::Z * s.offset, rotation: 0.0, size: DVec3::new(s.width, s.depth.max(0.01), s.height.unwrap_or(OBJECT.z)), opening: None, mirrored: false, role: s.appliance }),
         ModelTool::Point | ModelTool::Door | ModelTool::Window => {
-            Shape::Point(PointDef { at: a + DVec3::Z * s.offset, rotation: 0.0, size: DVec3::new(s.width, s.depth.max(0.01), s.height.unwrap_or(OBJECT.z)), opening: None, role: Default::default() })
+            Shape::Point(PointDef { at: a + DVec3::Z * s.offset, rotation: 0.0, size: DVec3::new(s.width, s.depth.max(0.01), s.height.unwrap_or(OBJECT.z)), opening: None, mirrored: false, role: Default::default() })
         }
         ModelTool::Column => {
             let base = z + s.offset;

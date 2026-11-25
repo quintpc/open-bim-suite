@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(m.touched_since(&before), Some([a, b].into()));
         // a door in the first wall: the wall it cuts, and the wall at its corner within reach
         let now = m.clone();
-        let door = add(&mut m, Shape::Point(PointDef { at: DVec3::new(2.0, 0.0, 0.0), rotation: 0.0, size: DVec3::new(0.9, 0.04, 2.1), opening: Some(OpeningKind::Door), role: Default::default() }));
+        let door = add(&mut m, Shape::Point(PointDef { at: DVec3::new(2.0, 0.0, 0.0), rotation: 0.0, size: DVec3::new(0.9, 0.04, 2.1), opening: Some(OpeningKind::Door), mirrored: false, role: Default::default() }));
         let touched = m.touched_since(&now).unwrap();
         assert!(touched.contains(&a) && touched.contains(&door) && !touched.contains(&far) && !touched.contains(&above), "{touched:?}");
         // a butt of the beams: both beams and the connection

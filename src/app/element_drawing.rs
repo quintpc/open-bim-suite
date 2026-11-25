@@ -499,7 +499,7 @@ mod tests {
         });
         let f = frame(&slab).unwrap();
         assert!(f.side.is_none() && (f.volume - 2.88).abs() < 1e-9, "{f:?}");
-        let object = Shape::Point(bim_core::PointDef { at: DVec3::ZERO, rotation: 0.0, size: DVec3::ONE, opening: None, role: Default::default() });
+        let object = Shape::Point(bim_core::PointDef { at: DVec3::ZERO, rotation: 0.0, size: DVec3::ONE, opening: None, mirrored: false, role: Default::default() });
         assert!(frame(&object).is_none());
     }
 

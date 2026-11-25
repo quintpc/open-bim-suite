@@ -109,14 +109,14 @@ impl App {
             Some(aim) => {
                 let o = aim.opening;
                 let foot = (aim.start + aim.along * (o.along + o.width / 2.0)).extend(aim.base + o.sill);
-                PointDef { at: foot, rotation: aim.along.y.atan2(aim.along.x), size: DVec3::new(o.width, LEAF, o.height), opening: Some(kind), role: Default::default() }
+                PointDef { at: foot, rotation: aim.along.y.atan2(aim.along.x), size: DVec3::new(o.width, LEAF, o.height), opening: Some(kind), mirrored: tool == ModelTool::Door && self.modeller.placement.of(tool).mirrored, role: Default::default() }
             }
             None => {
                 let s = self.modeller.placement.of(tool);
                 let (h, sill) = (s.height.unwrap_or(if tool == ModelTool::Door { DOOR.1 } else { WINDOW.1 }), if tool == ModelTool::Door { 0.0 } else { s.sill });
                 let Some(p) = self.plane_point(x, y, width, height, z) else { return };
                 let p = self.snapped(p, x, y, width, height);
-                PointDef { at: DVec3::new(p.x, p.y, z + sill), rotation: 0.0, size: DVec3::new(s.width, LEAF, h), opening: Some(kind), role: Default::default() }
+                PointDef { at: DVec3::new(p.x, p.y, z + sill), rotation: 0.0, size: DVec3::new(s.width, LEAF, h), opening: Some(kind), mirrored: tool == ModelTool::Door && s.mirrored, role: Default::default() }
             }
         };
         let name = self.modeller.tool.map_or("Door", |(_, name)| name);
@@ -128,14 +128,15 @@ impl App {
 
     /// A door or a window of `tool` placed by its numbers and not by a click: the middle of its
     /// foot at (x, y) on the level worked on (a window its sill above it), its width running at
-    /// `rotation` (radians from the x axis), with the sizes of the strip. It cuts the walls it
-    /// stands in, as one clicked does.
-    pub(super) fn place_opening_at(&mut self, tool: ModelTool, x: f64, y: f64, rotation: f64) {
+    /// `rotation` (radians from the x axis), with the sizes of the strip; a door hung the other
+    /// way with `mirrored` (as the strip says when not given). It cuts the walls it stands in, as
+    /// one clicked does.
+    pub(super) fn place_opening_at(&mut self, tool: ModelTool, x: f64, y: f64, rotation: f64, mirrored: Option<bool>) {
         let kind = if tool == ModelTool::Door { OpeningKind::Door } else { OpeningKind::Window };
         let (z, _, level) = self.work_plane();
         let s = self.modeller.placement.of(tool);
         let (h, sill) = (s.height.unwrap_or(if tool == ModelTool::Door { DOOR.1 } else { WINDOW.1 }), if tool == ModelTool::Door { 0.0 } else { s.sill });
-        let def = PointDef { at: DVec3::new(x, y, z + sill), rotation, size: DVec3::new(s.width, LEAF, h), opening: Some(kind), role: Default::default() };
+        let def = PointDef { at: DVec3::new(x, y, z + sill), rotation, size: DVec3::new(s.width, LEAF, h), opening: Some(kind), mirrored: tool == ModelTool::Door && mirrored.unwrap_or(s.mirrored), role: Default::default() };
         let name = self.modeller.tool.map_or("Door", |(_, name)| name);
         match self.add_element(name, level, Shape::Point(def)) {
             Ok(_) => self.modeller.refusal = None,
