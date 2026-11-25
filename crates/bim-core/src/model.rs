@@ -44,6 +44,46 @@ pub struct Model {
     /// The grid lines the project is set out on (see [`crate::datum`]).
     #[serde(default)]
     pub(crate) grids: Vec<crate::datum::GridDef>,
+    /// Where to look for what an element is made with (see [`Index`]): found when first asked
+    /// for, and again after every change of the elements.
+    #[serde(skip)]
+    index: Kept,
+}
+
+/// What evaluating an element looks up among the others, so it does not go through all of them:
+/// a model of twenty thousand walls is not read twenty thousand times over.
+#[derive(Debug, Default)]
+struct Index {
+    /// The connections each element is a member of, in id order.
+    joints: std::collections::HashMap<ElementId, Vec<ElementId>>,
+    /// The doors and windows, in id order.
+    openings: Vec<ElementId>,
+    /// The walls by the cells of a square grid (in the project's own coordinates) their boxes,
+    /// a little larger than they are, lie in; each cell's in id order.
+    walls: std::collections::HashMap<(i64, i64), Vec<ElementId>>,
+    /// The walls too long for the grid: looked at for every point.
+    long_walls: Vec<ElementId>,
+}
+
+/// The size of the cells walls are found by (metres), and how many cells a wall may lie in.
+const CELL: f64 = 4.0;
+const MOST_CELLS: i64 = 1024;
+
+/// The index of a model's elements, made when first asked for. It is no part of what the model
+/// is: a copy finds its own, and two models are the same whatever they have found.
+#[derive(Debug, Default)]
+struct Kept(std::sync::OnceLock<Index>);
+
+impl Clone for Kept {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for Kept {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 /// How near two points are to count as one (metres).
@@ -56,7 +96,7 @@ fn serves(a: Option<crate::element::Service>, b: Option<crate::element::Service>
 
 impl Model {
     pub fn new(grid: TileGrid) -> Self {
-        Self { grid, elements: BTreeMap::new(), next: 1, grids: Vec::new() }
+        Self { grid, elements: BTreeMap::new(), next: 1, grids: Vec::new(), index: Kept::default() }
     }
 
     pub fn len(&self) -> usize {
@@ -76,6 +116,61 @@ impl Model {
         self.elements.values()
     }
 
+    fn index(&self) -> &Index {
+        self.index.0.get_or_init(|| {
+            let mut index = Index::default();
+            for e in self.elements.values() {
+                match &e.shape {
+                    Shape::Connection(c) => {
+                        index.joints.entry(c.primary).or_default().push(e.id);
+                        if c.secondary != c.primary {
+                            index.joints.entry(c.secondary).or_default().push(e.id);
+                        }
+                    }
+                    Shape::Point(PointDef { opening: Some(_), .. }) => index.openings.push(e.id),
+                    Shape::Planar(p @ PlanarDef { form: PlanarForm::Wall { start, end, .. }, .. }) => {
+                        // its box in plan, larger by its half thickness and what counts as touching
+                        let origin = self.grid.origin(e.tile).truncate();
+                        let reach = p.total_thickness().abs() / 2.0 + 4.0 * JOIN_TOLERANCE;
+                        let (lo, hi) = (start.min(*end) + origin - reach, start.max(*end) + origin + reach);
+                        let cell = |v: f64| (v / CELL).floor() as i64;
+                        let (x0, x1, y0, y1) = (cell(lo.x), cell(hi.x), cell(lo.y), cell(hi.y));
+                        if !(lo.is_finite() && hi.is_finite()) || (x1 - x0 + 1).saturating_mul(y1 - y0 + 1) > MOST_CELLS {
+                            index.long_walls.push(e.id);
+                            continue;
+                        }
+                        for x in x0..=x1 {
+                            for y in y0..=y1 {
+                                index.walls.entry((x, y)).or_default().push(e.id);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            index
+        })
+    }
+
+    /// The connections element `id` is a member of, in id order.
+    pub fn connections_of(&self, id: ElementId) -> impl Iterator<Item = &Element> {
+        self.index().joints.get(&id).into_iter().flatten().filter_map(|c| self.elements.get(c))
+    }
+
+    /// The walls that may reach one of `points` (in the project's own coordinates), in id order:
+    /// every wall whose axis passes within its half thickness of one of them is among them.
+    pub(crate) fn walls_near(&self, points: &[DVec2]) -> Vec<&Element> {
+        let index = self.index();
+        let mut ids: Vec<ElementId> = index.long_walls.clone();
+        for p in points {
+            let cell = ((p.x / CELL).floor() as i64, (p.y / CELL).floor() as i64);
+            ids.extend(index.walls.get(&cell).into_iter().flatten());
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        ids.into_iter().filter_map(|id| self.elements.get(&id)).collect()
+    }
+
     /// Adds `element` under a new id, if it evaluates; a refusal leaves the model as it was.
     pub fn add(&mut self, mut element: Element) -> Result<ElementId, Refusal> {
         let id = ElementId(self.next.max(1));
@@ -86,6 +181,7 @@ impl Model {
         element.rehome(&self.grid);
         self.evaluate_element(&element)?;
         self.elements.insert(id, element);
+        self.index = Kept::default();
         self.next = id.0 + 1;
         Ok(id)
     }
@@ -95,6 +191,7 @@ impl Model {
     pub fn insert(&mut self, element: Element) {
         self.next = self.next.max(element.id.0 + 1);
         self.elements.insert(element.id, element);
+        self.index = Kept::default();
     }
 
     /// Changes an element, if the change evaluates.
@@ -105,12 +202,14 @@ impl Model {
         element.rehome(&self.grid);
         self.evaluate_element(&element)?;
         self.elements.insert(element.id, element);
+        self.index = Kept::default();
         Ok(())
     }
 
     /// Removes an element and the connections that join it; returns what was removed.
     pub fn remove(&mut self, id: ElementId) -> Vec<Element> {
         let Some(element) = self.elements.remove(&id) else { return Vec::new() };
+        self.index = Kept::default();
         let joined: Vec<ElementId> = self
             .elements
             .values()
@@ -225,6 +324,7 @@ impl Model {
         for id in &broken {
             self.elements.remove(id);
         }
+        self.index = Kept::default();
         // New automatic joins require a changed linear member. Broken connections were
         // still checked above, including those between systems.
         if changed.is_some_and(|ids| !ids.iter().any(|id| self.member(*id).is_ok())) {
@@ -346,7 +446,7 @@ impl Model {
         }
         let mut parts = self.body(element)?;
         // the cuts made in it, in id order; a cut that cannot be made leaves it as it is
-        for e in self.elements.values() {
+        for e in self.connections_of(element.id) {
             if let Shape::Connection(c) = &e.shape {
                 if c.kind == ConnectionKind::Cut && c.secondary == element.id {
                     if let Ok(cut) = self.cut(&parts, element, c.primary) {
@@ -385,7 +485,7 @@ impl Model {
         let length = start.distance(end);
         let Some(along) = (end - start).try_normalize() else { return Vec::new() };
         let mut out = Vec::new();
-        for e in self.elements.values() {
+        for e in self.index().openings.iter().filter_map(|id| self.elements.get(id)) {
             let Shape::Point(p @ PointDef { opening: Some(_), .. }) = &e.shape else { continue };
             let at = p.at + self.grid.offset(e.tile, target.tile);
             let from_start = at.truncate() - start;
@@ -527,7 +627,7 @@ impl Model {
     fn joined(&self, id: ElementId, tile: TileKey) -> Joined {
         let mut joined = Joined::default();
         let offset = self.grid.offset(TileKey::default(), tile);
-        for e in self.elements.values() {
+        for e in self.connections_of(id) {
             let Shape::Connection(c) = &e.shape else { continue };
             if c.primary != id && c.secondary != id {
                 continue;

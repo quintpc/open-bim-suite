@@ -99,8 +99,11 @@ impl WallJoin {
 /// it meets none (it is made as it is).
 pub(crate) fn wall_join(model: &Model, element: &Element) -> Option<WallJoin> {
     let me = wall_of(model, element, element.tile)?;
+    // the walls that reach one of its ends: those among all that an end can meet
+    let origin = model.grid.origin(element.tile).truncate();
     let others: Vec<Wall> = model
-        .iter()
+        .walls_near(&[me.start + origin, me.end + origin])
+        .into_iter()
         .filter(|e| e.id != element.id)
         .filter_map(|e| wall_of(model, e, element.tile))
         .filter(|o| o.top.min(me.top) - o.base.max(me.base) > LINEAR_TOLERANCE)
@@ -232,6 +235,32 @@ mod tests {
         assert!(close(volume(&m, b), 0.8 * 3.0), "{}", volume(&m, b));
         // together they cover the L exactly: 5.1 × 0.2 plus 0.2 × 3.9
         assert!(close(volume(&m, a) + volume(&m, b), (5.1 * 0.2 + 0.2 * 3.9) * 3.0));
+    }
+
+    #[test]
+    fn walls_meet_over_a_tile_boundary_and_at_the_end_of_a_very_long_one() {
+        // a corner at the edge of the tile grid: one wall in the tile left of it, one in the tile
+        // right of it (the walls are found by where they lie in the project, not in their tile)
+        let mut m = Model::new(TileGrid::default());
+        let a = add(&mut m, wall((-5.0, 0.0), (0.0, 0.0), 0.2));
+        let b = add(&mut m, wall((0.0, 0.0), (0.0, 4.0), 0.2));
+        assert_ne!(m.get(a).unwrap().tile, m.get(b).unwrap().tile);
+        assert!(close(volume(&m, a), 3.0) && close(volume(&m, b), 2.4), "{} {}", volume(&m, a), volume(&m, b));
+        // a wall kilometres long, at an angle: too long for the cells it would lie in, and met
+        // at its far end and on its side all the same
+        let mut m = Model::new(TileGrid::default());
+        let long = add(&mut m, wall((0.0, 0.0), (3000.0, 3000.0), 0.2));
+        let end = add(&mut m, wall((3000.0, 3000.0), (3004.0, 2996.0), 0.2));
+        let tee = add(&mut m, wall((1500.0, 1500.0), (1504.0, 1496.0), 0.2));
+        let plain = |length: f64| length * 0.2 * 3.0;
+        let joined = |id| super::wall_join(&m, m.get(id).unwrap()).map(|j| j.extend);
+        assert!(joined(end).is_some_and(|e| e[0] > 0.0 && e[1] == 0.0), "the end is cut to the corner: {:?}", joined(end));
+        assert!(joined(long).is_some_and(|e| e[0] == 0.0 && e[1] > 0.0), "and so is the long wall's far end: {:?}", joined(long));
+        assert!(close(volume(&m, tee), plain(32f64.sqrt() - 0.1)), "the tee stops at the long wall's face: {}", volume(&m, tee));
+        assert!(volume(&m, long) > plain(18_000_000f64.sqrt()) - 0.2, "{}", volume(&m, long));
+        // far from every other, a wall is made as it is
+        let alone = add(&mut m, wall((100.0, 0.0), (104.0, 0.0), 0.2));
+        assert!(close(volume(&m, alone), plain(4.0)));
     }
 
     #[test]

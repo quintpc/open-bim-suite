@@ -1711,7 +1711,7 @@ fn properties(model: &bim_core::Model, e: &Element, parts: &[bim_core::Part], le
     }
     // the definitions an IFCX file keeps and gives back: the element's, and those of the
     // connections it is the primary member of (a connection has no body, so no node of its own)
-    let joints = model.iter().filter(|c| matches!(&c.shape, Shape::Connection(j) if j.primary == e.id));
+    let joints = model.connections_of(e.id).filter(|c| matches!(&c.shape, Shape::Connection(j) if j.primary == e.id));
     let definitions: Vec<&Element> = std::iter::once(e).chain(joints).collect();
     put(crate::export::ifcx::DEFINITION, serde_json::to_string(&definitions).unwrap_or_default());
     match e.shape_in_project(&grid) {
