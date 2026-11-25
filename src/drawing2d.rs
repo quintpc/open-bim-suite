@@ -486,6 +486,14 @@ impl Drawing2d {
             // the hatch lines of the cut faces, at least 0.7 mm apart on paper, where the view's
             // kind of drawing hatches what is cut
             for fill in cut.fills.iter().filter(|_| rules.hatched) {
+                // the colour behind its hatch, where its material has one: a sign that is a
+                // fill alone (reinforced concrete cast in situ, steel) is drawn by it
+                if let Some((behind, _)) = fill.look.filter(|(behind, _)| *behind != [255; 3]) {
+                    let loops: Vec<Vec<[f64; 2]>> = fill.loops.iter().map(|l| l.iter().map(|p| p.map(f64::from)).collect()).collect();
+                    for points in filled(&loops, crop) {
+                        self.polygons.push(Polygon2d { points: points.into_iter().map(to).collect(), color: behind });
+                    }
+                }
                 for [a, b] in fill.lines(fill.spacing() / per_metre as f32, 0.0007) {
                     let (a, b) = (a.map(f64::from), b.map(f64::from));
                     let piece = match crop {
@@ -595,28 +603,32 @@ fn add(p: [f64; 2], n: [f64; 2], d: f64) -> [f64; 2] {
 /// Clip each filled triangle to the view bounds. Triangulating first preserves holes.
 pub(crate) fn view_polygons(doc: &Document, path: &str) -> Vec<Polygon2d> {
     let crop = doc.view_marks(path).and_then(|(_, crop)| crop);
+    doc.view_fills(path).flat_map(|fill| filled(&fill.loops, crop).into_iter().map(|points| Polygon2d { points, color: fill.color })).collect()
+}
+
+/// What the outlines `loops` fill (by the even-odd rule, so holes stay open) as triangles, each
+/// cut back to `crop`.
+fn filled(loops: &[Vec<[f64; 2]>], crop: Option<([f64; 2], [f64; 2])>) -> Vec<Vec<[f64; 2]>> {
     let mut out = Vec::new();
-    for fill in doc.view_fills(path) {
-        for triangle in crate::caps::triangulate(&fill.loops) {
-            let mut points = triangle.to_vec();
-            if let Some((lo, hi)) = crop {
-                for (axis, edge, sign) in [(0, lo[0], 1.0), (1, lo[1], 1.0), (0, hi[0], -1.0), (1, hi[1], -1.0)] {
-                    let Some(&mut_last) = points.last() else { break };
-                    let mut prev = mut_last;
-                    let input = std::mem::take(&mut points);
-                    for p in input {
-                        let inside = (p[axis] - edge) * sign >= 0.0;
-                        if inside != ((prev[axis] - edge) * sign >= 0.0) {
-                            let t = (edge - prev[axis]) / (p[axis] - prev[axis]);
-                            points.push([prev[0] + t * (p[0] - prev[0]), prev[1] + t * (p[1] - prev[1])]);
-                        }
-                        if inside { points.push(p); }
-                        prev = p;
+    for triangle in crate::caps::triangulate(loops) {
+        let mut points = triangle.to_vec();
+        if let Some((lo, hi)) = crop {
+            for (axis, edge, sign) in [(0, lo[0], 1.0), (1, lo[1], 1.0), (0, hi[0], -1.0), (1, hi[1], -1.0)] {
+                let Some(&mut_last) = points.last() else { break };
+                let mut prev = mut_last;
+                let input = std::mem::take(&mut points);
+                for p in input {
+                    let inside = (p[axis] - edge) * sign >= 0.0;
+                    if inside != ((prev[axis] - edge) * sign >= 0.0) {
+                        let t = (edge - prev[axis]) / (p[axis] - prev[axis]);
+                        points.push([prev[0] + t * (p[0] - prev[0]), prev[1] + t * (p[1] - prev[1])]);
                     }
+                    if inside { points.push(p); }
+                    prev = p;
                 }
             }
-            if points.len() >= 3 { out.push(Polygon2d { points, color: fill.color }); }
         }
+        if points.len() >= 3 { out.push(points); }
     }
     out
 }
@@ -884,6 +896,23 @@ mod tests {
         assert_eq!((d.texts[0].text.as_str(), d.texts[0].at, d.texts[0].align), ("Kamer ë", [1.0, 1.0], Align::Left));
         assert!((d.texts[0].height - 0.25).abs() < 1e-9);
         assert!((d.paper_per_unit() - 0.01).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_cut_of_a_material_drawn_by_a_colour_is_filled_with_it() {
+        let (doc, plan) = plan();
+        // a column of reinforced concrete cast in situ (NEN 47: grey, no lines) with a duct
+        // through it, and a wall hatched on the paper
+        let square = |x: f32, y: f32, side: f32| vec![[x, y], [x + side, y], [x + side, y + side], [x, y + side]];
+        let concrete = crate::drawing::Fill { loops: vec![square(1.0, 1.0, 0.4), square(1.1, 1.1, 0.2)], look: Some(([192; 3], [0; 3])), ..Default::default() };
+        let brick = crate::drawing::Fill { loops: vec![square(3.0, 1.0, 0.4)], look: Some(([255; 3], [0; 3])), ..Default::default() };
+        let cut = Cut { fills: vec![concrete, brick], ..room() };
+        let d = view_drawing(&doc, &plan, &cut, &Rules { hatched: true, ..Rules::default() }).unwrap();
+        assert!(!d.polygons.is_empty() && d.polygons.iter().all(|p| p.color == [192; 3]), "the concrete alone, in its grey");
+        let area: f64 = d.polygons.iter().map(|p| (0..p.points.len()).map(|k| { let (a, b) = (p.points[k], p.points[(k + 1) % p.points.len()]); a[0] * b[1] - b[0] * a[1] }).sum::<f64>().abs() / 2.0).sum();
+        assert!((area - (0.16 - 0.04)).abs() < 1e-6, "the duct through it stays open: {area}");
+        // a drawing that hatches nothing fills nothing
+        assert!(view_drawing(&doc, &plan, &cut, &Rules { hatched: false, ..Rules::default() }).unwrap().polygons.is_empty());
     }
 
     #[test]

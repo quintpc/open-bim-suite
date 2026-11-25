@@ -2,7 +2,8 @@
 //! meet. A click on one selects its join, so a mitre or a butt (which has no body of its own)
 //! can be picked as an end plate can by its plate. A fitting between service runs (a bend, a tee,
 //! a transition) is a body of its own and is picked by it: it gets a mark only while selected,
-//! so a network of pipes is not hidden under its marks.
+//! so a network of pipes is not hidden under its marks. Over a floor plan only the joins within
+//! the plan's range show: those of the other storeys are no part of it.
 
 use super::{App, Message};
 use bim_core::ElementId;
@@ -30,12 +31,16 @@ impl App {
             return None;
         }
         let picked = self.selected_modelled();
+        // over a floor plan: the joins of what the plan shows, not those of every storey
+        let range = self.shown_view().and_then(|view| self.document.plan(view)).and_then(|plan| self.document.plan_range(plan));
+        let within = |p: Vec3| range.is_none_or(|(low, high)| (low..=high).contains(&f64::from(p.z)));
         let marks: Vec<(ElementId, Vec3, bool)> = self
             .modeller
             .model
             .iter()
             .filter(|e| picked.contains(&e.id) || !matches!(&e.shape, bim_core::Shape::Connection(c) if c.kind.is_fitting()))
             .filter_map(|e| Some((e.id, self.modeller.model.join_node(e.id)?.as_vec3(), picked.contains(&e.id))))
+            .filter(|(_, at, _)| within(*at))
             .collect();
         (!marks.is_empty()).then(|| JoinMarks { marks, view_proj: self.camera.view_proj(self.aspect()) * self.model_matrix(), ink, fill })
     }

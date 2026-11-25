@@ -777,7 +777,6 @@ mod tests {
         let other = app.document.view_symbols(&plan)[15..].to_vec();
         let (a, b) = (DVec2::from_array(other[0][0]), DVec2::from_array(other[0][1]));
         assert!((a - DVec2::new(7.39, 4.0)).length() < 1e-9 && (b - DVec2::new(7.39, 4.78)).length() < 1e-9, "{a} {b}");
-        let swing = app.document.view_symbols(&plan)[..15].to_vec();
         app.select_modelled(bim_core::ElementId(app.modeller.model.iter().map(|e| e.id.0).max().unwrap()));
         let _ = app.update(crate::app::Message::DeletePicked);
         app.sel.set(None);
